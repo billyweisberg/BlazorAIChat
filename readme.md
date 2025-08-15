@@ -9,21 +9,21 @@ This solution utilizes several open source libraries to help with document inges
 * dompurify
 * marked
 * Semantic Kernel
-* Semantic Memory
+* Kernel Memory
 
 ## Features
-- **AI Integration**: Utilizes advanced AI models to provide intelligent responses.
-- **Data Interaction**: Enables users to chat with their data using Azure OpenAI models.
-- **Deployment Flexibility**: Can be operated locally or hosted on Azure App Service.
-- **Authentication**: Supports EasyAuth authentication when hosted on Azure.
-- **Document Upload**: Allows users to upload TXT, DOCX, XLSX, PPTX, or PDF documents into the knowledge base. When using Azure App Service with EasyAuth, uploaded knowledge is associated exclusively with the user.
-- **Image Analysis**: Supports image uploads for querying, compatible with models like GPT-4. When using models that don't support images and you have Azure Document Intelligence configured, it will OCR uploaded images and store the results as knowledge.
-- **Data Extraction from URLs**: URLs to web pages or documents included in a chat message will be used as knowledge for answering questions.
-- **Streaming Responses**: Provides streaming chat results with the option to stop responses.
-- **Data Management**: Offers the ability to clear chat history and delete data stored in the user's knowledge base.
-- **Retry Handling**: Automatically pauses and retries calls to Azure OpenAI if it exceeds the API rate limit.
-- **Chat History Pruning**: Designed to help ensure that the requests to Azure OpenAI do not exceed the context window.
-- **Experimental MCP**: Utilize tools from Model Context Protocol servers
+- AI Integration: Utilizes advanced AI models to provide intelligent responses.
+- Data Interaction: Enables users to chat with their data using Azure OpenAI models.
+- Deployment Flexibility: Can be operated locally or hosted on Azure App Service.
+- Authentication: Supports EasyAuth authentication when hosted on Azure.
+- Document Upload: Allows users to upload TXT, DOCX, XLSX, PPTX, or PDF documents into the knowledge base. When using Azure App Service with EasyAuth, uploaded knowledge is associated exclusively with the user.
+- Image Analysis: Supports image uploads for querying, compatible with models like GPT-4. When using models that don't support images and you have Azure Document Intelligence configured, it will OCR uploaded images and store the results as knowledge.
+- Data Extraction from URLs: URLs to web pages or documents included in a chat message will be used as knowledge for answering questions.
+- Streaming Responses: Provides streaming chat results with the option to stop responses.
+- Data Management: Offers the ability to clear chat history and delete data stored in the user's knowledge base.
+- Retry Handling: Automatically pauses and retries calls to Azure OpenAI if it exceeds the API rate limit.
+- Chat History Pruning: Designed to help ensure that the requests to Azure OpenAI do not exceed the context window.
+- Experimental MCP: Utilize tools from Model Context Protocol (MCP) servers with role defaults and per-user secrets.
 
 
 ## Chat Over Documents (RAG)
@@ -33,49 +33,54 @@ Retrieval-augmented generation (RAG) is essential for AI chat because it enhance
 
 RAG also helps address the limited context window of large language models by only sending relevant knowledge to the model.
 
-This demo utilizes a solution called Kernel Memory that extracts the text from documents or provided URLs, splits the content into chunks, and then generate embeddings for each chunk. The results are then stored, by default, on the web server filesystem. The original source document is not stored in the original format. To improve performance you may choose to use PostgreSQL or Azure AI Search as the storage location.
+This demo utilizes Kernel Memory to extract text from documents or provided URLs, split the content into chunks, and generate embeddings for each chunk. The results are then stored, by default, on the web server filesystem. The original source document is not stored in the original format. To improve performance you may choose to use PostgreSQL or Azure AI Search as the storage location.
 
 When a user chats with the solution, a semantic search is completed across the stored knowledge and the most related pieces of knowledge are returned to the large language model so it can attempt to answer the user's question.
 
-To improve this applications performance during the RAG process you may choose to utilize the following Azure AI Services:
+Additional behavior implemented in the app:
+- AI-driven RAG decision: When `AIDeterminesRagUsage` is true, an agent analyzes the prompt and decides whether retrieval is needed. RAG is always used when URLs are present in the prompt.
+- Contextual query generation: The app condenses recent chat turns and the current prompt into a search query to improve retrieval relevance.
+- Hybrid retrieval: Results from Kernel Memory and (optionally) Azure AI Search are combined and prioritized.
+
+To improve this application's performance during the RAG process you may choose to utilize the following Azure AI Services:
 * Azure AI Search 
 * Azure Document Intelligence (For OCR when using models that don't support images)
 
-Note: If deployed on an Azure App Service with EasyAuth enabled, the uploaded documents and provided URLs become knowledge for only the user who provided the content. It does not share the knowledge with other users of the solution.  If you are not using EasyAuth, you are running local, or deployed the app on another .NET web host, all of the users will be considered guests and all of the knowledge provided will be shared.
+Note: If deployed on an Azure App Service with EasyAuth enabled, the uploaded documents and provided URLs become knowledge for only the user who provided the content. It does not share the knowledge with other users of the solution. If you are not using EasyAuth, you are running local, or deployed the app on another .NET web host, all of the users will be considered guests and all of the knowledge provided will be shared.
 
 ## Requirements
-- **Azure Subscription**: Must include at least one Azure OpenAI chat model and one Azure OpenAI embedding model deployed. Optionally you can use Azure PostgreSQL for the knowledge storage. 
-- **Deployment Options**: 
-  - **Local**: Can be run locally.
-  - **Azure App Service**: Can be published to an Azure App Service. If deployed on Azure App Service, EasyAuth can be enabled for authentication.
+- Azure Subscription: Must include at least one Azure OpenAI chat model and one Azure OpenAI embedding model deployed. Optionally you can use Azure PostgreSQL for the knowledge storage. 
+- Deployment Options: 
+  - Local: Can be run locally.
+  - Azure App Service: Can be published to an Azure App Service. If deployed on Azure App Service, EasyAuth can be enabled for authentication.
 
 
 ## Configuration
 The appsettings.json file has a few configuration parameters that must be set for the app to properly work:
 
-  ```
-  "AIDeterminesRagUsage": false,
-  "AzureOpenAIChatCompletion": {
-    "Endpoint": "",
-    "ApiKey": "",
-    "Deployment": "",
-    "Tokenizer": "",
-    "MaxInputTokens": 128000
-    "SupportsImages": false,
-    "ResponseChunkSize": 40
-  },
-  "AzureOpenAIEmbedding": {
-    "Deployment": "",
-    "Tokenizer": "",
-    "MaxInputTokens": 8192
-  },
-  "RequireEasyAuth": true,
-  "SystemMessage" : "You are a helpful AI assistant. Respond in a friendly and professional tone.",
-  "ConnectionStrings": {
-    "PostgreSQL": "",
-    "ConfigDatabase": "Data Source=ConfigDatabase.db"
-  },
-  "DocumentIntelligence": {
+```
+"AIDeterminesRagUsage": false,
+"AzureOpenAIChatCompletion": {
+  "Endpoint": "",
+  "ApiKey": "",
+  "DeploymentName": "",
+  "Tokenizer": "",
+  "MaxInputTokens": 128000,
+  "SupportsImages": false,
+  "ResponseChunkSize": 40
+},
+"AzureOpenAIEmbedding": {
+  "DeploymentName": "",
+  "Tokenizer": "",
+  "MaxInputTokens": 8192
+},
+"RequireEasyAuth": true,
+"SystemMessage" : "You are a helpful AI assistant. Respond in a friendly and professional tone.",
+"ConnectionStrings": {
+  "PostgreSQL": "",
+  "ConfigDatabase": "Data Source=ConfigDatabase.db"
+},
+"DocumentIntelligence": {
   "Endpoint": "",
   "ApiKey": ""
 },
@@ -129,117 +134,74 @@ The appsettings.json file has a few configuration parameters that must be set fo
   }
 }
 ```
-- **AIDeterminesRagUsage**
-True if you want AI to determine if it should skip using RAG and use configured tools instead for answering questions.
-False if you want the chat to always use RAG with tools
+- AIDeterminesRagUsage
+  - True if you want AI to determine if it should skip using RAG and use configured tools instead for answering questions.
+  - False if you want the chat to always use RAG with tools
 
-- **AzureOpenAIChatCompletion Configuration**: 
-  - Include your Azure OpenAI endpoint URL, API Key, and the name of the deployed chat model you intend to use. If you plan to use Azure AI Search shared knowledge base then you must ensure the endpoint is for the openai.azure.com domain. This can be configured by clicking the Generate Custom Domain Name in networking section of the Azure Open AI Service.
+- AzureOpenAIChatCompletion Configuration: 
+  - Include your Azure OpenAI endpoint URL, API Key, and the name of the deployed chat model you intend to use. If you plan to use Azure AI Search shared knowledge base then you must ensure the endpoint is for the openai.azure.com domain. This can be configured by clicking the Generate Custom Domain Name in the networking section of the Azure OpenAI Service.
   - Specify the tokenizer to use. Generally this is the model name (not deployment name)
   - Specify the maximum input tokens the selected model supports
   - If the model supports images, set `SupportsImages` to `true`.
-  - ResponseChunkSize defines the number of response chunks from the Azure OpenAI service that need to be received before the UI is updated. The higher the number, the less UI updates are required, which improves the Blazor app performance.
+  - `ResponseChunkSize` defines the number of response chunks from the Azure OpenAI service that need to be received before the UI is updated. The higher the number, the less UI updates are required, which improves the Blazor app performance.
 
-- **AzureOpenAIEmbedding Configuration**: 
+- AzureOpenAIEmbedding Configuration: 
   - Specify the deployed embedding model you plan to use.
   - Specify the tokenizer to use. Generally this is the model name (not deployment name)
   - Specify the maximum input tokens the selected model supports
   - Both the chat and embedding models are assumed to be accessed through the same Azure OpenAI endpoint and API key.
 
-- **PostgreSQL (optional)**:
-If you would like to use PostgreSQL in place of files for knowledge storage, you must manually deploy a PostgreSQL instance and configure the connection string. Note: You must enable the pgvector extension to use PostgreSQL.
+- PostgreSQL (optional):
+  - If you would like to use PostgreSQL in place of files for knowledge storage, you must manually deploy a PostgreSQL instance and configure the connection string. Note: You must enable the pgvector extension to use PostgreSQL.
 
-- **Azure Document Intelligence (optional)**
-You may choose to optionally manually deploy Azure Document Intelligence which can be used to OCR uploaded images. This is not needed or enabled if your AI model supports images.
+- Azure Document Intelligence (optional)
+  - You may choose to optionally manually deploy Azure Document Intelligence which can be used to OCR uploaded images. This is not needed or enabled if your AI model supports images.
 
-- **Azure AI Search (optional)**
-Enables the usage of Azure AI Search for a centralized knowledgebase using documents stored within an Azure Blob Storage account.
-This can also be configued to replace the file and PostgreSQL knowledge store for individual chat sessions.
-  - Endpoint: URI to the Azure AI Search Instance
-  - ApiKey: API Key for the Azure AI Search Instance
-  - IndexPerChatSession: If true it will replace the file or PostgreSQL knowledge store for individual chat sessions.
-  - SharedIndex: Name of the shared index to use for the centralized knowledgebase. Leave empty if you do not want a central knowledge store.
-  - SharedIndexAzureBlobStorageConnection: Connection string to the Azure Storage Account that holds the documents and information for the central knowledgebase.  Must be provided if SharedIndex has a value.
-  - SharedIndexAzureBlobStorageContainer: The name of the container in the Azure Storage Account that holds the knowledgebase content. This must be provided if SharedIndex has a value.
+- Azure AI Search (optional)
+  - Enables the usage of Azure AI Search for a centralized knowledgebase using documents stored within an Azure Blob Storage account.
+  - This can also be configured to replace the file and PostgreSQL knowledge store for individual chat sessions.
+    - Endpoint: URI to the Azure AI Search Instance
+    - ApiKey: API Key for the Azure AI Search Instance
+    - IndexPerChatSession: If true it will replace the file or PostgreSQL knowledge store for individual chat sessions.
+    - SharedIndex: Name of the shared index to use for the centralized knowledgebase. Leave empty if you do not want a central knowledge store.
+    - SharedIndexAzureBlobStorageConnection: Connection string to the Azure Storage Account that holds the documents and information for the central knowledgebase. Must be provided if SharedIndex has a value.
+    - SharedIndexAzureBlobStorageContainer: The name of the container in the Azure Storage Account that holds the knowledgebase content. This must be provided if SharedIndex has a value.
 
-- **EasyAuth Configuration**: 
+- EasyAuth Configuration: 
   - If utilizing EasyAuth with Azure App Service, it is recommended to set `RequireEasyAuth` to `true` to ensure that users are fully authenticated and not recognized as guests. This setting is set to true by default.
 
-- **MCP Configuration**:
-This section allows you to configure multiple MCP servers and user-supplied inputs for tools provided by Model Context Protocol (MCP) servers. The configuration is structured as follows:
-  - **inputs**: An array of input definitions, each with an `id`, `description`, `type`, and `password` flag. These can be referenced in server configuration using `${input:input_id}`.  Note: This is not fully implemented yet and does not replace placeholders with values.
-  - **servers**: A dictionary of MCP server definitions, keyed by server name. Each server can have:
-    - **type**: The transport type for the MCP Server (`stdio` or `sse`).
-    - **command**: The command to launch the server (for `stdio` type).
-    - **args**: List of command line arguments (for `stdio` type).
-    - **env**: Dictionary of environment variables (for `stdio` type). Keys and values are arbitrary, and values can reference inputs.
-    - **url**: The URL to connect to (for `sse` type).
-    - **headers**: Dictionary of HTTP headers (for `sse` type). Keys and values are arbitrary, and values can reference inputs.
+- MCP Configuration:
+  - This section allows you to configure multiple MCP servers and user-supplied inputs for tools provided by Model Context Protocol (MCP) servers.
+  - Inputs can be referenced in server configuration using `${input:input_id}` and are securely stored per-user. Placeholders are resolved at runtime into args/env/headers.
+  - Configuration precedence and management:
+    - Global servers: Defined in appsettings under `mcp.servers`.
+    - Role defaults: Managed in the Admin UI at `/admin/mcp-defaults` and applied to users by role.
+    - Per-user overrides: Stored per user and take precedence over role and global defaults.
+  - Connections are cached briefly and established with short per-server timeouts and retries for responsiveness.
 
-Example MCP configuration:
-```
-"mcp": {
-  "inputs": [
-    {
-      "id": "github_pat",
-      "description": "GitHub personal access token",
-      "type": "promptString",
-      "password": true
-    },
-    {
-      "id": "api_token",
-      "description": "API token for SSE server",
-      "type": "promptString",
-      "password": true
-    }
-  ],
-  "servers": {
-    "github-stdio": {
-      "type": "stdio",
-      "command": "docker",
-      "args": [
-        "run",
-        "-i",
-        "--rm",
-        "-e",
-        "GITHUB_PERSONAL_ACCESS_TOKEN",
-        "ghcr.io/github/github-mcp-server"
-      ],
-      "env": {
-        "GITHUB_PERSONAL_ACCESS_TOKEN": "${input:github_pat}"
-      }
-    },
-    "secure-sse-tool": {
-      "type": "sse",
-      "url": "https://your-secure-sse-server.example.com/mcp",
-      "headers": {
-        "Authorization": "Bearer ${input:api_token}",
-        "X-Custom-Header": "custom-value"
-      }
-    }
-  }
-}
-```
-- **inputs**: Define any user-supplied secrets or tokens needed for MCP servers. These can be referenced in `env` or `headers` using `${input:input_id}`.
-- **servers**: Define each MCP server, specifying its type, command/args/env (for stdio), or url/headers (for sse). The `env` and `headers` sections support any number of arbitrary key-value pairs, and values can reference inputs.
+### Environment-specific configuration
+- In Development, the app only loads `appsettings.Development.json`.
+- In other environments, the app only loads `appsettings.json`.
 
-This solution has been tested with the `gpt-4o` chat model and the `text-embedding-ada-002` model. Other models can be integrated and tested as needed.
+This ensures your local development settings do not bleed into production and vice versa.
+
+This solution has been tested with the `gpt-4o` chat model and the `text-embedding-3-small` model (recommended). Legacy models like `text-embedding-ada-002` may also work but are not preferred.
 
 
 ## Deployment
 
 ### Manual Deployment
 
-- **Azure OpenAI Service Setup**: Manually create your Azure OpenAI Service and deploy both a chat model and an embedding model.
-- **Repository Cloning**: Clone this repository and open it in Visual Studio 2022.
-- **Configuration**: Update the `appsettings.json` file with the appropriate values.
-- **Running the Application**: You can run the application locally through Visual Studio or publish it to an Azure App Service or another .NET web host.
+- Azure OpenAI Service Setup: Manually create your Azure OpenAI Service and deploy both a chat model and an embedding model.
+- Repository Cloning: Clone this repository and open it in Visual Studio 2022.
+- Configuration: Update the `appsettings.json` (or `appsettings.Development.json` for local dev) file with the appropriate values.
+- Running the Application: You can run the application locally through Visual Studio or publish it to an Azure App Service or another .NET web host.
 
 ### Automatic Deployment to Azure
 
 To deploy the application to Azure, you can use the button below. This process will create an Azure App Service Plan, an Azure App Service, and an Azure OpenAI Service with two models deployed. It will also deploy the website to the Azure App Service. 
 
-**Important**: Please read and understand all the information in this section before pressing the "Deploy to Azure" button. **For protection, the default value for RequireEasyAuth is set to true.**
+Important: Please read and understand all the information in this section before pressing the "Deploy to Azure" button. For protection, the default value for RequireEasyAuth is set to true.
 
 
 [![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fmhackermsft%2FBlazorAIChat%2Fmaster%2FInfra%2Fazuredeploy.json)
@@ -247,9 +209,9 @@ To deploy the application to Azure, you can use the button below. This process w
 If you encounter an error indicating that the deployment has failed, please verify whether the web application has been created. If it has, access the deployment center logs to determine if the code deployment is still in progress. Due to the time required for code compilation and deployment, the portal may incorrectly report a timeout error while the deployment is ongoing. By continuously monitoring the deployment status, you should see it complete successfully, resulting in the website being deployed.
 
 #### Important Azure Deployment Notes  
-The button above will deploy Azure services that will be billed against your Azure subscription. The deployment template allows you to choose region, web app SKU, AI Chat model, AI embed model, along with OpenAI capacity size.  These options will impact the cost of the deployed solutions. Since the automatic deployment uses the Azure App Service build feature, it will use a significant amount of local web storage to complete the build process. After the web site has been deployed you can open the App Service console and run the command `dotnet nuget locals all --clear` to clear the local Nuget package store which will reclaim over 800MB of storage. After running that command you may be able to scale down to the Azure App Service Plan free SKU. If you do not configure Azure AI Search or PostgreSQL, the web server's file storage is used for knowledge storage. You may need to scale up your App Service Plan SKU to support the additional amount of storage needed for your knowledge store.
+The button above will deploy Azure services that will be billed against your Azure subscription. The deployment template allows you to choose region, web app SKU, AI Chat model, AI embed model, along with OpenAI capacity size. These options will impact the cost of the deployed solutions. Since the automatic deployment uses the Azure App Service build feature, it will use a significant amount of local web storage to complete the build process. After the web site has been deployed you can open the App Service console and run the command `dotnet nuget locals all --clear` to clear the local Nuget package store which will reclaim over 800MB of storage. After running that command you may be able to scale down to the Azure App Service Plan free SKU. If you do not configure Azure AI Search or PostgreSQL, the web server's file storage is used for knowledge storage. You may need to scale up your App Service Plan SKU to support the additional amount of storage needed for your knowledge store.
 
-**Warning:** If you do not enable EasyAuth, your website will be available **on the public internet** by default. This means that **other people can connect and use the website**. You will **incur Azure OpenAI charges** for all usage of your website. If you upload documents, that **knowledge will be accessible to all users**. 
+Warning: If you do not enable EasyAuth, your website will be available on the public internet by default. This means that other people can connect and use the website. You will incur Azure OpenAI charges for all usage of your website. If you upload documents, that knowledge will be accessible to all users. 
 
 If you want to protect the website it is highly recommended that you set `Require Easy Auth` to true during the deployment and then configure EasyAuth authentication on the App Service once the deployment completes. Once EasyAuth is configured, each user will be required to login and they will have their own knowledge base which is not shared with other users.
 
@@ -269,39 +231,42 @@ Read more about Azure OpenAI Service quota here: https://learn.microsoft.com/en-
 
 ### Costs
 The cost to operate this demo application in your subscription will depend upon a few factors:
-- **App Service Plan size** - The deployment script by default uses the B1 tier. You can, however, adjust this to increase performance and features.
-- **Azure OpenAI Service** - Two Azure OpenAI Models are required in order for this demo to function properly. The recommended models are `gpt-4o` and `text-embedding-ada-002`. The chat models are priced based on the number of input and output tokens. The embedding model is priced based on the number of tokens.
+- App Service Plan size - The deployment script by default uses the B1 tier. You can, however, adjust this to increase performance and features.
+- Azure OpenAI Service - Two Azure OpenAI Models are required in order for this demo to function properly. The recommended models are `gpt-4o` and `text-embedding-3-small`. The chat models are priced based on the number of input and output tokens. The embedding model is priced based on the number of tokens.
 
 You can learn more about the cost for Azure App Service and Azure OpenAI models at the links below.
 
-- **Azure App Service** - https://azure.microsoft.com/en-us/pricing/details/app-service/windows/
-- **Azure OpenAI** - https://azure.microsoft.com/en-us/pricing/details/cognitive-services/openai-service/
+- Azure App Service - https://azure.microsoft.com/en-us/pricing/details/app-service/windows/
+- Azure OpenAI - https://azure.microsoft.com/en-us/pricing/details/cognitive-services/openai-service/
 
 ## Authentication
-* If running locally, outside of Azure, or without EasyAuth, the app will show the user as a guest.
-* If running on an Azure App Service with EasyAuth configured, the app will show the logged in username.
+- If running locally, outside of Azure, or without EasyAuth, the app will show the user as a guest.
+- If running on an Azure App Service with EasyAuth configured, the app will show the logged in username.
 
 See the following link for details about configuring EasyAuth in Azure App Service: https://learn.microsoft.com/en-us/azure/app-service/overview-authentication-authorization
 
 ## Authorization
 This solution allows you to require users to request access to the application if EasyAuth has been configured. If authorization is enabled, new users will need to click on the request access button and then wait for an administrator to approve the request. For a new deployment, the first user who requests access will automatically be approved and made the administrator. Administrators will use the admin menu to view the users and those that are waiting for approvals. Administrators may configure the application to only allow approved users to have access for a set number of days. Once a user's access expires, an administrator can edit the user's account and modify the access approved date to extend a user's access.
 
-If authorization is not enabled, then any authenticated user will be able to utilize the application and there will not be a concept of administrators.  NOTE: The default deployment is setup so that if EasyAuth is enabled, authorization will also be enabled. If an admin chooses to turn off authorization, there is currently no way to turn it back on via the application.
+If authorization is not enabled, then any authenticated user will be able to utilize the application and there will not be a concept of administrators. NOTE: The default deployment is setup so that if EasyAuth is enabled, authorization will also be enabled. If an admin chooses to turn off authorization, there is currently no way to turn it back on via the application.
+
+### Admin configuration
+- The Admin Config page at `/admin/config` lets administrators set account expiration days, require account approvals, and toggle automatic approvals.
 
 ## Knowledge Storage
-All uploaded knowledge is stored by default on the web server's file system under the KNN folder. 
+All uploaded knowledge is stored by default on the web server's file system under two folders:
+- `KNN` (vector store)
+- `SFS` (file/document storage)
 
-Optionally you can configure the demo to utilize an Azure PostgreSQL instance as the knowledge store.
+Optionally you can configure the demo to utilize an Azure PostgreSQL instance as the knowledge store, or Azure AI Search for session or shared knowledge.
 
 Users can use the delete chat button in the application to remove a chat and delete all of the uploaded knowledge for that chat conversation. 
 
-An administrator may choose to delete all files and directories from the KNN folder.
+An administrator may choose to delete all files and directories from the KNN/SFS folders.
 
 ## Impact of Azure OpenAI Capacity Settings
 
-This demonstration application is designed for low-volume use and does not include retry logic for Azure OpenAI calls. If a request exceeds the allocated Azure OpenAI quota for the chat or embedding model, a notification will appear at the top of the application. 
-
-To address this issue, please ensure that your Azure OpenAI models are configured with the appropriate quota to accommodate the volume of tokens and requests being submitted.
+This demonstration application includes retry logic for Azure OpenAI calls, but you can still hit quota limits. If a request exceeds the allocated Azure OpenAI quota for the chat or embedding model, a notification will appear at the top of the application. Ensure your Azure OpenAI models are configured with sufficient quota to accommodate the volume of tokens and requests being submitted.
 
 For more information on managing your Azure OpenAI service quotas, please visit this link: https://learn.microsoft.com/en-us/azure/ai-services/openai/how-to/quota?tabs=rest
 
