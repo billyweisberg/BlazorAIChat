@@ -155,7 +155,7 @@
                                         </td>
                                         <td>@g.Type</td>
                                         <td>
-                                            @if (g.Type == "sse")
+                                            @if (g.Type == "sse" || g.Type == "http")
                                             {
                                                 <span class="text-break">@g.Url</span>
                                             }
@@ -194,7 +194,7 @@
                                                 <button class="btn btn-sm btn-outline-primary" disabled="@g.AlreadyAdded" @onclick="(() => AddGlobalToMyServers(g))">Add</button>
                                             </div>
                                             <div class="mt-2 small text-break">
-                                                @if (g.Type == "sse")
+                                                @if (g.Type == "sse" || g.Type == "http")
                                                 {
                                                     <div><span class="text-muted">URL:</span> @g.Url</div>
                                                 }
@@ -235,6 +235,7 @@
                                 <li><strong>Headers</strong>: JSON object of string:string. Example: {"Authorization":"Bearer ${"{input:api_token}"}"}</li>
                                 <li><strong>stdio</strong>: use Command + Args + Env</li>
                                 <li><strong>sse</strong>: use Url + Headers</li>
+                                <li><strong>http</strong>: use Url + Headers (streamable HTTP)</li>
                                 <li>Reference saved inputs with ${"{input:your_id}"}</li>
                             </ul>
                             <div class="mb-1"><strong>Tips</strong>:</div>
@@ -280,7 +281,7 @@
                                         <span>@s.Type</span>
                                     </td>
                                     <td class="text-break">
-                                        @if (s.Type == "sse")
+                                        @if (s.Type == "sse" || s.Type == "http")
                                         {
                                             <span>@s.Url</span>
                                         }
@@ -367,7 +368,7 @@
                                             </div>
                                         </div>
                                         <div class="mt-2 small text-break">
-                                            @if (s.Type == "sse")
+                                            @if (s.Type == "sse" || s.Type == "http")
                                             {
                                                 <div><span class="text-muted">URL:</span> @s.Url</div>
                                             }
@@ -421,7 +422,7 @@
                                             else { <span class="badge bg-secondary">Global</span>; }
                                         </td>
                                         <td>@es.Type</td>
-                                        <td class="text-break">@(es.Type == "sse" ? es.Url : es.Command)</td>
+                                        <td class="text-break">@(es.Type == "sse" || es.Type == "http" ? es.Url : es.Command)</td>
                                         <td class="text-center">
                                             @if (GetStatus(es.Name) is null)
                                             {
@@ -487,9 +488,10 @@
                     <select class="form-select" @bind="editor.Type">
                         <option value="stdio">stdio</option>
                         <option value="sse">sse</option>
+                        <option value="http">http</option>
                     </select>
                 </div>
-                @if (editor.Type == "sse")
+                @if (editor.Type == "sse" || editor.Type == "http")
                 {
                     <div class="mb-2">
                         <label class="form-label">URL</label>
@@ -1577,7 +1579,7 @@
         var t = (type ?? string.Empty).Trim().ToLowerInvariant();
         var key = new System.Text.StringBuilder();
         key.Append(t).Append('|');
-        if (string.Equals(t, "sse", StringComparison.OrdinalIgnoreCase)) key.Append((url ?? string.Empty).Trim()); else key.Append((command ?? string.Empty).Trim());
+        if (string.Equals(t, "sse", StringComparison.OrdinalIgnoreCase) || string.Equals(t, "http", StringComparison.OrdinalIgnoreCase)) key.Append((url ?? string.Empty).Trim()); else key.Append((command ?? string.Empty).Trim());
         key.Append('|');
         key.Append(NormalizeJsonArray(argsJson)).Append('|');
         key.Append(NormalizeJsonObject(envJson)).Append('|');

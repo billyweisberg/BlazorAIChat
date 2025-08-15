@@ -10,6 +10,7 @@ This solution utilizes several open source libraries to help with document inges
 * marked
 * Semantic Kernel
 * Kernel Memory
+* Model Context Protocol (.NET client)
 
 ## Features
 - AI Integration: Utilizes advanced AI models to provide intelligent responses.
@@ -23,7 +24,7 @@ This solution utilizes several open source libraries to help with document inges
 - Data Management: Offers the ability to clear chat history and delete data stored in the user's knowledge base.
 - Retry Handling: Automatically pauses and retries calls to Azure OpenAI if it exceeds the API rate limit.
 - Chat History Pruning: Designed to help ensure that the requests to Azure OpenAI do not exceed the context window.
-- Experimental MCP: Utilize tools from Model Context Protocol (MCP) servers with role defaults and per-user secrets.
+- Experimental MCP: Utilize tools from Model Context Protocol (MCP) servers (stdio, SSE, Streamable HTTP) with role defaults and per-user secrets.
 
 
 ## Chat Over Documents (RAG)
@@ -53,6 +54,7 @@ Note: If deployed on an Azure App Service with EasyAuth enabled, the uploaded do
 - Deployment Options: 
   - Local: Can be run locally.
   - Azure App Service: Can be published to an Azure App Service. If deployed on Azure App Service, EasyAuth can be enabled for authentication.
+- MCP transports supported: stdio, SSE, and Streamable HTTP.
 
 
 ## Configuration
@@ -112,7 +114,7 @@ The appsettings.json file has a few configuration parameters that must be set fo
     },
     {
       "id": "api_token",
-      "description": "API token for SSE server",
+      "description": "API token for SSE/HTTP server",
       "type": "promptString",
       "password": true
     }
@@ -136,6 +138,14 @@ The appsettings.json file has a few configuration parameters that must be set fo
     "secure-sse-tool": {
       "type": "sse",
       "url": "https://your-secure-sse-server.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${input:api_token}",
+        "X-Custom-Header": "custom-value"
+      }
+    },
+    "secure-http-tool": {
+      "type": "http",
+      "url": "https://your-streamable-http-server.example.com/mcp",
       "headers": {
         "Authorization": "Bearer ${input:api_token}",
         "X-Custom-Header": "custom-value"
@@ -190,6 +200,11 @@ The appsettings.json file has a few configuration parameters that must be set fo
 - MCP Configuration:
   - This section allows you to configure multiple MCP servers and user-supplied inputs for tools provided by Model Context Protocol (MCP) servers.
   - Inputs can be referenced in server configuration using `${input:input_id}` and are securely stored per-user. Placeholders are resolved at runtime into args/env/headers.
+  - Supported transports:
+    - `stdio`: runs a process using `command`, `args`, and `env`.
+    - `sse`: connects to `url` with `headers` using Server-Sent Events.
+    - `http`: connects to `url` with `headers` using Streamable HTTP.
+    - Note: for `sse` and `http`, only `url` and `headers` apply; `command/args/env` are ignored.
   - Configuration precedence and management:
     - Global servers: Defined in appsettings under `mcp.servers`.
     - Role defaults: Managed in the Admin UI at `/admin/mcp-defaults` and applied to users by role.

@@ -192,7 +192,7 @@ namespace BlazorAIChat.Services
             _cache.Set(StatusCacheKey(userId), new CachedStatus(statuses), new MemoryCacheEntryOptions
             {
                 SlidingExpiration = TimeSpan.FromSeconds(30),
-                AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(2)
+                AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(Math.Max(1, _appSettings.Value.Mcp.CacheAbsoluteExpirationMinutes))
             });
 
             return statuses;
@@ -422,7 +422,7 @@ namespace BlazorAIChat.Services
             var type = (cfg.Type ?? string.Empty).Trim().ToLowerInvariant();
             var key = new StringBuilder();
             key.Append(type).Append('|');
-            if (string.Equals(type, "sse", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(type, "sse", StringComparison.OrdinalIgnoreCase) || string.Equals(type, "http", StringComparison.OrdinalIgnoreCase))
             {
                 key.Append((cfg.Url ?? string.Empty).Trim());
             }
@@ -469,6 +469,7 @@ namespace BlazorAIChat.Services
 
         private async Task<IMcpClient> CreateClientAsync(string serverName, UserMcpServerConfig cfg, string userId)
         {
+            // HTTP-based transports
             if (string.Equals(cfg.Type, "sse", StringComparison.OrdinalIgnoreCase))
             {
                 var httpClient = _httpClientFactory.CreateClient("defaultHttpClient");
@@ -477,7 +478,24 @@ namespace BlazorAIChat.Services
                     new SseClientTransport(httpClient: httpClient, transportOptions: new SseClientTransportOptions
                     {
                         Endpoint = new Uri(cfg.Url ?? string.Empty),
-                        AdditionalHeaders = headers
+                        AdditionalHeaders = headers,
+                        TransportMode = HttpTransportMode.Sse
+                    }),
+                    new McpClientOptions
+                    {
+                        ClientInfo = new() { Name = serverName, Version = "1.0.0.0" }
+                    });
+            }
+            else if (string.Equals(cfg.Type, "http", StringComparison.OrdinalIgnoreCase))
+            {
+                var httpClient = _httpClientFactory.CreateClient("defaultHttpClient");
+                var headers = MergeHeadersWithInputs(cfg.HeadersJson, userId);
+                return await McpClientFactory.CreateAsync(
+                    new SseClientTransport(httpClient: httpClient, transportOptions: new SseClientTransportOptions
+                    {
+                        Endpoint = new Uri(cfg.Url ?? string.Empty),
+                        AdditionalHeaders = headers,
+                        TransportMode = HttpTransportMode.StreamableHttp
                     }),
                     new McpClientOptions
                     {
@@ -485,6 +503,7 @@ namespace BlazorAIChat.Services
                     });
             }
 
+            // stdio transport
             var args = MergeArgsWithInputs(cfg.ArgsJson, userId);
             var env = MergeEnvWithInputs(cfg.EnvJson, userId);
             return await McpClientFactory.CreateAsync(new StdioClientTransport(new()
