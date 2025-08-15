@@ -52,6 +52,7 @@
 
   <ItemGroup>
     <Folder Include="Extensions\" />
+    <Folder Include="KeyRing\" />
     <Folder Include="KNN\" />
     <Folder Include="wwwroot\Images\" />
   </ItemGroup>
