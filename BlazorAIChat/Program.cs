@@ -13,6 +13,11 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Microsoft.SemanticKernel;
 using ModelContextProtocol.Client;
+using Microsoft.AspNetCore.DataProtection;
+using Azure.Extensions.AspNetCore.DataProtection.Blobs;
+using Azure.Extensions.AspNetCore.DataProtection.Keys;
+using Azure.Identity;
+using Azure.Security.KeyVault.Secrets;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -36,6 +41,62 @@ builder.Logging.SetMinimumLevel(LogLevel.Information);
 
 builder.Services.Configure<AppSettings>(builder.Configuration);
 
+// Data Protection: shared key ring (cross-platform)
+var dpBuilder = builder.Services.AddDataProtection()
+    .SetApplicationName("BlazorAIChat");
+
+var mode = builder.Configuration["DataProtection:Mode"]?.ToLowerInvariant() ?? "auto";
+var blobUri = builder.Configuration["DataProtection:BlobUri"]; // e.g., https://<storage>.blob.core.windows.net/<container>/blazoraichat-keyring.xml
+var keyId = builder.Configuration["DataProtection:KeyId"];     // e.g., https://<keyvault>.vault.azure.net/keys/<key-name>/<key-version>
+var kvVaultUri = builder.Configuration["DataProtection:KeyVault:VaultUri"]; // e.g., https://<vault>.vault.azure.net/
+var kvSecretPrefix = builder.Configuration["DataProtection:KeyVault:SecretNamePrefix"] ?? "blazoraichat-dp-";
+var kvEncryptorKeyId = builder.Configuration["DataProtection:KeyVault:KeyEncryptorKeyId"]; // optional
+
+bool hasBlob = !string.IsNullOrWhiteSpace(blobUri);
+bool hasKv = !string.IsNullOrWhiteSpace(kvVaultUri);
+
+if (string.Equals(mode, "keyvault", StringComparison.OrdinalIgnoreCase) || (string.Equals(mode, "auto") && hasKv))
+{
+    // Use Key Vault as key ring repository
+    var credential = new DefaultAzureCredential();
+    var secretClient = new SecretClient(new Uri(kvVaultUri!), credential);
+
+    dpBuilder.AddKeyManagementOptions(opt =>
+    {
+        opt.XmlRepository = new KeyVaultXmlRepository(secretClient, kvSecretPrefix);
+    });
+
+    // Optionally wrap keys with a KV key
+    if (!string.IsNullOrWhiteSpace(kvEncryptorKeyId))
+    {
+        dpBuilder.ProtectKeysWithAzureKeyVault(new Uri(kvEncryptorKeyId), credential);
+    }
+}
+else if (string.Equals(mode, "blobstorage", StringComparison.OrdinalIgnoreCase) || (string.Equals(mode, "auto") && hasBlob))
+{
+    // Use Azure Blob Storage for key ring
+    var credential = new DefaultAzureCredential();
+    dpBuilder.PersistKeysToAzureBlobStorage(new Uri(blobUri!), credential);
+
+    if (!string.IsNullOrWhiteSpace(keyId))
+    {
+        dpBuilder.ProtectKeysWithAzureKeyVault(new Uri(keyId), credential);
+    }
+}
+else if (builder.Environment.IsDevelopment())
+{
+    // Local dev fallback: persist to local file system so restarts keep keys
+    var keyRingPath = Path.Combine(builder.Environment.ContentRootPath, "KeyRing");
+    Directory.CreateDirectory(keyRingPath);
+    dpBuilder.PersistKeysToFileSystem(new DirectoryInfo(keyRingPath));
+}
+else
+{
+    // No configured persistence; will use ephemeral keys (not recommended)
+    var startupLogger = LoggerFactory.Create(lb => lb.AddConsole()).CreateLogger("Startup");
+    startupLogger.LogWarning("DataProtection key ring persistence not configured. Using ephemeral keys.");
+}
+
 // Register a default HttpClient for streaming/long-lived connections
 builder.Services.AddHttpClient("defaultHttpClient");
 
@@ -51,8 +112,8 @@ builder.Services.AddSingleton<AISearchService>();
 // Add memory cache for MCP connection manager
 builder.Services.AddMemoryCache();
 
-// Register secure storage for MCP input secrets
-builder.Services.AddSingleton<ISecureStorage, DpapiSecureStorage>();
+// Register secure storage for MCP input secrets (cross-platform)
+builder.Services.AddSingleton<ISecureStorage, DataProtectionSecureStorage>();
 
 // HttpContext accessor needed by circuit handler
 builder.Services.AddHttpContextAccessor();

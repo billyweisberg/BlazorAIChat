@@ -92,6 +92,16 @@ The appsettings.json file has a few configuration parameters that must be set fo
   "SharedIndexAzureBlobStorageConnection": "",
   "SharedIndexAzureBlobStorageContainer": ""
 },
+"DataProtection": {
+  "Mode": "Auto",                // Auto | BlobStorage | KeyVault
+  "BlobUri": "https://<storage>.blob.core.windows.net/<container>/blazoraichat-keyring.xml",
+  "KeyId": "https://<vault>.vault.azure.net/keys/<name>/<version>",   // optional: wrap keys with KV key
+  "KeyVault": {
+    "VaultUri": "https://<vault>.vault.azure.net/",                   // when set and Mode is Auto/KeyVault, store key ring in KV Secrets
+    "SecretNamePrefix": "blazoraichat-dp-",                           // optional prefix for secret names
+    "KeyEncryptorKeyId": "https://<vault>.vault.azure.net/keys/<name>/<version>" // optional: wrap keys with KV key
+  }
+},
 "mcp": {
   "inputs": [
     {
@@ -166,6 +176,13 @@ The appsettings.json file has a few configuration parameters that must be set fo
     - SharedIndex: Name of the shared index to use for the centralized knowledgebase. Leave empty if you do not want a central knowledge store.
     - SharedIndexAzureBlobStorageConnection: Connection string to the Azure Storage Account that holds the documents and information for the central knowledgebase. Must be provided if SharedIndex has a value.
     - SharedIndexAzureBlobStorageContainer: The name of the container in the Azure Storage Account that holds the knowledgebase content. This must be provided if SharedIndex has a value.
+
+- Data Protection key ring persistence (cross-platform):
+  - The app uses ASP.NET Core Data Protection to encrypt per-user secrets. Choose where to persist the key ring:
+    - Blob Storage: set `DataProtection.Mode` to `BlobStorage` and configure `DataProtection.BlobUri`. Optionally set `DataProtection.KeyId` to wrap keys with a Key Vault key.
+    - Key Vault: set `DataProtection.Mode` to `KeyVault` and configure `DataProtection.KeyVault.VaultUri`. Optionally set `DataProtection.KeyVault.KeyEncryptorKeyId` to wrap keys with a Key Vault key. Keys are stored as KV secrets with the prefix in `DataProtection.KeyVault.SecretNamePrefix`.
+    - Auto (default): prefers Key Vault if `VaultUri` is set, else Blob Storage if `BlobUri` is set. In Development, if neither is set, keys persist to `./KeyRing` (local file system) to preserve current behavior.
+  - The app authenticates to Azure using Managed Identity or developer credentials via `DefaultAzureCredential`.
 
 - EasyAuth Configuration: 
   - If utilizing EasyAuth with Azure App Service, it is recommended to set `RequireEasyAuth` to `true` to ensure that users are fully authenticated and not recognized as guests. This setting is set to true by default.
@@ -264,17 +281,17 @@ Users can use the delete chat button in the application to remove a chat and del
 
 An administrator may choose to delete all files and directories from the KNN/SFS folders.
 
-## Impact of Azure OpenAI Capacity Settings
+## Data Protection key ring persistence
+The app uses ASP.NET Core Data Protection to securely protect per-user secrets for MCP and other features.
 
-This demonstration application includes retry logic for Azure OpenAI calls, but you can still hit quota limits. If a request exceeds the allocated Azure OpenAI quota for the chat or embedding model, a notification will appear at the top of the application. Ensure your Azure OpenAI models are configured with sufficient quota to accommodate the volume of tokens and requests being submitted.
+- Storage options (select via `DataProtection.Mode`):
+  - `KeyVault`: Stores the key ring as Azure Key Vault secrets (requires `DataProtection.KeyVault.VaultUri`). Optionally wraps keys using a Key Vault key via `DataProtection.KeyVault.KeyEncryptorKeyId`.
+  - `BlobStorage`: Stores the key ring in Azure Blob Storage at `DataProtection.BlobUri`. Optionally wraps keys using `DataProtection.KeyId`.
+  - `Auto` (default): Prefers Key Vault when a VaultUri is configured; otherwise uses Blob Storage when a BlobUri is configured. In Development, if neither is set, keys persist on the local file system under `./KeyRing`.
 
-For more information on managing your Azure OpenAI service quotas, please visit this link: https://learn.microsoft.com/en-us/azure/ai-services/openai/how-to/quota?tabs=rest
+- Azure permissions:
+  - Managed Identity is used by default (`DefaultAzureCredential`).
+  - For Key Vault: grant `get`, `list`, `set` on secrets; and `wrapKey`/`unwrapKey` if key wrapping is enabled.
+  - For Blob Storage: grant Storage Blob Data Contributor on the container.
 
-## Known Limitation
-Word, Excel or PowerPoint documents that have data classification or DRM enabled cannot be uploaded. You will receive a file corruption error. Only upload documents that are not protected.
-
-## Disclaimer
-This code is for demonstration purposes only. It has not been evaluated or reviewed for production purposes. Please utilize caution and do your own due diligence before using this code. I am not responsible for any issues you experience or damages caused by the use or misuse of this code.
-
-## Credits
-Thank you to the contributors of the Azure-Samples / cosmosdb-chatgpt project. The UI for this demo application was based upon some of their great work. You can check out that project here: https://github.com/Azure-Samples/cosmosdb-chatgpt
+- Migration: If switching persistence backends, migrate the existing key ring entries so previously protected data remains decryptable.

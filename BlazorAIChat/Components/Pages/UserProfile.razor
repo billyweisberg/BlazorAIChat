@@ -14,6 +14,7 @@
 @inject AIChatDBContext dbContext
 @inject BlazorAIChat.Services.IMcpConnectionManager McpManager
 @inject IOptions<AppSettings> AppOptions
+@inject BlazorAIChat.Services.ISecureStorage SecureStorage
 
 @if (currentUser is not null)
 {
@@ -937,7 +938,6 @@
         mcpInputs.Clear();
         var cfgInputs = AppOptions.Value.Mcp?.Inputs ?? new();
         var existing = dbContext.UserMcpInputValues.Where(x => x.UserId == currentUser!.Id).ToList();
-        var protector = new BlazorAIChat.Services.DpapiSecureStorage();
 
         var requiredIds = ComputeRequiredInputIds();
 
@@ -958,7 +958,7 @@
                 vm.HasSavedValue = true;
                 if (!vm.Password)
                 {
-                    var raw = protector.UnprotectOrNull(saved.ProtectedValue) ?? string.Empty;
+                    var raw = SecureStorage.UnprotectOrNull(saved.ProtectedValue) ?? string.Empty;
                     if (string.Equals(vm.Type, "boolean", StringComparison.OrdinalIgnoreCase))
                     {
                         vm.BoolValue = bool.TryParse(raw, out var b) && b;
@@ -1158,7 +1158,6 @@
 
             // Upsert MCP input values securely
             var existing = dbContext.UserMcpInputValues.Where(x => x.UserId == currentUser.Id).ToDictionary(x => x.InputId, StringComparer.OrdinalIgnoreCase);
-            var protector = new BlazorAIChat.Services.DpapiSecureStorage();
             foreach (var vm in mcpInputs)
             {
                 string? toStore = null;
@@ -1192,7 +1191,7 @@
                     continue; // skip overwriting password when empty
                 }
 
-                var protectedVal = protector.Protect(toStore);
+                var protectedVal = SecureStorage.Protect(toStore);
                 if (existing.TryGetValue(vm.Id, out var row))
                 {
                     row.ProtectedValue = protectedVal;
