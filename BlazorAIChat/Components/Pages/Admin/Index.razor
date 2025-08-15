@@ -1,0 +1,22 @@
+@page "/admin"
+@using BlazorAIChat.Models
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = nameof(UserRoles.Admin))]
+@rendermode InteractiveServer
+@inject NavigationManager Nav
+
+<div class="admin-container">
+    <h3>Admin</h3>
+    <div class="list-group w-50">
+        <a class="list-group-item list-group-item-action" href="/admin/users">Manage Users</a>
+        <a class="list-group-item list-group-item-action" href="/admin/config">Configuration</a>
+        <a class="list-group-item list-group-item-action" href="/admin/mcp-defaults">MCP Defaults by Role</a>
+    </div>
+
+    <div class="mt-3">
+        <button class="btn btn-secondary" @onclick="GoHome">Back</button>
+    </div>
+</div>
+
+@code {
+    private void GoHome() => Nav.NavigateTo("/");
+}

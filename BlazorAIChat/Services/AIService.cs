@@ -31,12 +31,13 @@ namespace BlazorAIChat.Services
         private readonly AIChatDBContext dbContext;
         private readonly ChatCompletionAgent sessionSummaryAgent;
         private readonly ChatCompletionAgent promptRewriteAgent;
-        private readonly ChatCompletionAgent ragDecisionAgent;
+        private ChatCompletionAgent ragDecisionAgent;
         private readonly ChatCompletionAgent contextualQueryAgent;
         private readonly ChatHistoryService chatHistoryService;
         private readonly ILogger<AIService> logger;
         private readonly Kernel kernel;
         private readonly AISearchService? azureAISearchService;
+        private readonly IMcpConnectionManager mcpConnectionManager;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="AIService"/> class.
@@ -46,13 +47,14 @@ namespace BlazorAIChat.Services
         /// <param name="httpClientFactory">The HTTP client factory.</param>
         /// <param name="dbContext">The database context.</param>
         /// <param name="kernel">The Semantic Kernel instance.</param>
-        public AIService(IOptions<AppSettings> appSettings, ChatHistoryService chatHistoryService, IHttpClientFactory httpClientFactory, AIChatDBContext dbContext, ILogger<AIService> logger, Kernel kernel, AISearchService aISearchService)
+        public AIService(IOptions<AppSettings> appSettings, ChatHistoryService chatHistoryService, IHttpClientFactory httpClientFactory, AIChatDBContext dbContext, ILogger<AIService> logger, Kernel kernel, AISearchService aISearchService, IMcpConnectionManager mcpConnectionManager)
         {
             this.dbContext = dbContext;
             this.chatHistoryService = chatHistoryService;
             this.logger = logger;
             this.kernel = kernel;
             this.azureAISearchService = aISearchService;
+            this.mcpConnectionManager = mcpConnectionManager;
             settings = appSettings.Value;
             httpClient = httpClientFactory.CreateClient("retryHttpClient");
             chatCompletionTokenizer = TokenizerFactory.GetTokenizerForModel(settings.AzureOpenAIChatCompletion.Tokenizer);
@@ -231,6 +233,47 @@ namespace BlazorAIChat.Services
             return kernelMemoryBuilder.Build<MemoryServerless>();
         }
 
+        private void RefreshRagDecisionAgent()
+        {
+            // Recreate the agent so we can inject the latest tool list into Instructions (init-only)
+            ragDecisionAgent = new ChatCompletionAgent
+            {
+                Name = "RAGDecisionAgent",
+                Kernel = kernel,
+                Instructions = $"""
+                    Determine whether the question can be answered by the available tools or requires retrieval from stored knowledge.
+                    
+                    AVAILABLE KERNEL FUNCTIONS:
+                    {GetAvailableFunctionsList(kernel)}
+                    
+                    RULES FOR DECISION:
+                    1. If the question contains URLs, ALWAYS return 'true'
+                    2. If the question refers to specific documents or uploaded content, return 'true'
+                    3. If the question requires factual information, specific data, or domain knowledge like legal requirements, demographics, statistics, regulations, historical facts, or specific information about locations, return 'true'
+                    4. If the question can be answered using only simple utility functions like getting the current time, date, or basic calculations, return 'false'
+                    5. For ambiguous cases where both tools and retrieval might help, prefer 'true'
+                    6. If you are unsure, return 'true'
+                          
+                    EXAMPLES:
+                    - "What time is it?" → 'false' (can be answered by tools)
+                    - "What is the weather in Detroit?" → 'false' (can be answered by tools)
+                    - "Summarize the PDF I uploaded" → 'true' (needs retrieval)
+                    - "What does this webpage say about climate change: https://example.com" → 'true' (contains URL)
+                    - "How old do you have to be to get a driver's license in Ohio?" → 'true' (requires factual/legal information)
+                    - "What are the requirements to vote in California?" → 'true' (requires factual/legal information)
+
+                    
+                    Analyze the question and respond with ONLY 'true' or 'false'.
+                """,
+                Arguments = new KernelArguments(
+                    new OpenAIPromptExecutionSettings()
+                    {
+                        Temperature = 0,
+                        MaxTokens = 10,
+                    })
+            };
+        }
+
         /// <summary>
         /// Processes a list of URLs with kernel memory.
         /// </summary>
@@ -278,6 +321,10 @@ namespace BlazorAIChat.Services
             logger.LogInformation("Getting chat response for session: {SessionId}, user: {UserId}", currentSession.SessionId, currentUser.Id);
             ArgumentNullException.ThrowIfNull(chatCompletionTokenizer);
             ArgumentNullException.ThrowIfNull(chatCompletionService);
+
+            // Ensure per-user MCP plugins are connected and attached
+            await mcpConnectionManager.EnsurePluginsForUserAsync(currentUser.Id, kernel).ConfigureAwait(false);
+            RefreshRagDecisionAgent();
 
             // Conditionally perform RAG only if needed
             bool ragNeeded = await ShouldUseRAGForPrompt(prompt, currentSession.SessionId);

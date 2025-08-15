@@ -1,65 +1,1035 @@
-﻿@page "/userProfile"
-@rendermode InteractiveServer
+﻿@rendermode InteractiveServer
+@page "/userProfile"
 @using BlazorAIChat.Components.Shared
 @using BlazorAIChat.Models
 @using BlazorAIChat.Utils
 @using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components
 @using Microsoft.AspNetCore.Components.Authorization
 @using Microsoft.EntityFrameworkCore
+@using Microsoft.Extensions.Options
 @attribute [Authorize]
 @inject NavigationManager NavigationManager
 @inject AuthenticationStateProvider AuthenticationStateProvider
 @inject AIChatDBContext dbContext
+@inject BlazorAIChat.Services.IMcpConnectionManager McpManager
+@inject IOptions<AppSettings> AppOptions
 
-@if (currentUser!=null)
+@if (currentUser is not null)
 {
     <div class="admin-container">
-        <div class="card mt-3" style="max-width:700px">
-            <div class="card-header">
-                <h4>User Profile</h4>
+        <div class="card mt-3" style="max-width:1100px">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h4 class="mb-0">User Profile</h4>
+                <div class="d-flex align-items-center gap-2">
+                    @if (statusLoading)
+                    {
+                        <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                    }
+                    <button class="btn btn-outline-secondary btn-sm" @onclick="RefreshStatuses">Refresh MCP Status</button>
+                    <button class="btn btn-outline-danger btn-sm" @onclick="DisconnectMyMcp">Disconnect my MCP</button>
+                </div>
             </div>
             <div class="card-body">
-                <div class="form-group">
-                    <label>Name:</label>
-                    <InputText class="form-control" @bind-Value="currentUser.Name" />
+                @if (currentUser.Role == UserRoles.Guest)
+                {
+                    <div class="alert alert-warning" role="alert">
+                        You are using the shared guest account. All MCP server configurations and input values you set here are shared across everyone using this site while EasyAuth is disabled.
+                    </div>
+                }
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <div class="form-group">
+                            <label>Name:</label>
+                            <InputText class="form-control" @bind-Value="currentUser.Name" disabled="@disableIdentityFields" />
+                        </div>
+                        <div class="form-group">
+                            <label>Email:</label>
+                            <InputText class="form-control" @bind-Value="currentUser.Email" disabled="@disableIdentityFields" />
+                        </div>
+                        <div class="form-group">
+                            <label>Role:</label>
+                            <input type="text" class="form-control" value="@Enum.GetName(currentUser.Role)" disabled />
+                        </div>
+                        <div class="form-group">
+                            <label>Requested:</label>
+                            <input type="text" class="form-control" value="@currentUser.DateRequested.ToShortDateString()" disabled />
+                        </div>
+                        <div class="form-group">
+                            <label>Approved:</label>
+                            <input type="text" class="form-control" value="@(currentUser.DateApproved.HasValue?currentUser.DateApproved.Value.ToShortDateString():string.Empty)" disabled="true" />
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="alert alert-info small">
+                            You can securely store input values referenced by MCP servers (e.g. ${"{input:github_pat}"}). Secrets are encrypted on the server. For password inputs, existing values are not displayed.
+                        </div>
+                        @if (mcpInputs.Count == 0)
+                        {
+                            <div class="text-muted">No MCP inputs are defined in configuration.</div>
+                        }
+                        else
+                        {
+                            <div class="list-group">
+                                @foreach (var inp in mcpInputs)
+                                {
+                                    <div class="list-group-item">
+                                        <div class="mb-1 d-flex align-items-center">
+                                            <div class="fw-bold">@inp.Description</div>
+                                            <code class="ms-2 text-muted">(@inp.Id)</code>
+                                            @if (inp.IsRequired)
+                                            {
+                                                <span class="badge bg-secondary ms-2">required</span>
+                                            }
+                                            @if (!string.IsNullOrWhiteSpace(inp.Type) && !string.Equals(inp.Type, "promptString", StringComparison.OrdinalIgnoreCase))
+                                            {
+                                                <span class="badge bg-light text-dark ms-2">@inp.Type</span>
+                                            }
+                                        </div>
+                                        <div>
+                                            @if (string.Equals(inp.Type, "boolean", StringComparison.OrdinalIgnoreCase))
+                                            {
+                                                <div class="form-check form-switch">
+                                                    <input class="form-check-input" type="checkbox" @bind="inp.BoolValue" />
+                                                    <label class="form-check-label">@(inp.BoolValue?"True":"False")</label>
+                                                </div>
+                                            }
+                                            else if (string.Equals(inp.Type, "number", StringComparison.OrdinalIgnoreCase))
+                                            {
+                                                <input class="form-control form-control-sm" type="number" @bind="inp.NumberValue" />
+                                            }
+                                            else if (string.Equals(inp.Type, "url", StringComparison.OrdinalIgnoreCase))
+                                            {
+                                                <input class="form-control form-control-sm" type="url" placeholder="https://..." @bind="inp.EnteredValue" />
+                                            }
+                                            else
+                                            {
+                                                var inputType = inp.Password ? "password" : "text";
+                                                <input class="form-control form-control-sm" type="@inputType" placeholder="@(inp.Password && inp.HasSavedValue ? "Enter new value to replace saved" : "")" @bind="inp.EnteredValue" />
+                                                @if (inp.Password && inp.HasSavedValue && string.IsNullOrEmpty(inp.EnteredValue))
+                                                {
+                                                    <small class="text-muted">A value is already saved.</small>
+                                                }
+                                            }
+                                            @if (!string.IsNullOrEmpty(inp.ValidationError))
+                                            {
+                                                <div class="text-danger small mt-1">@inp.ValidationError</div>
+                                            }
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+                        }
+                    </div>
                 </div>
-                <div class="form-group">
-                    <label>Email:</label>
-                    <InputText class="form-control" @bind-Value="currentUser.Email" />
+
+                <hr />
+                <h5>Global MCP Servers (from configuration)</h5>
+                <p class="text-muted">These servers are defined globally. You can add any of them to your personal server list for customization.</p>
+                @if (globalServers.Count == 0)
+                {
+                    <div class="text-muted">No global MCP servers are defined.</div>
+                }
+                else
+                {
+                    <div class="table-responsive d-none d-md-block">
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Type</th>
+                                    <th>Command/URL</th>
+                                    <th>Args</th>
+                                    <th>Env</th>
+                                    <th>Headers</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var g in globalServers)
+                                {
+                                    <tr>
+                                        <td>
+                                            <span class="fw-semibold">@g.Name</span>
+                                        </td>
+                                        <td>@g.Type</td>
+                                        <td>
+                                            @if (g.Type == "sse")
+                                            {
+                                                <span class="text-break">@g.Url</span>
+                                            }
+                                            else
+                                            {
+                                                <span class="text-break">@g.Command</span>
+                                            }
+                                            @if (g.RequiredInputs.Count > 0)
+                                            {
+                                                <div class="small text-muted mt-1">inputs: @string.Join(", ", g.RequiredInputs)</div>
+                                            }
+                                        </td>
+                                        <td class="small text-break">@g.ArgsJson</td>
+                                        <td class="small text-break">@g.EnvJson</td>
+                                        <td class="small text-break">@g.HeadersJson</td>
+                                        <td>
+                                            <button class="btn btn-sm btn-outline-primary" disabled="@g.AlreadyAdded" title="@(g.AlreadyAdded ? "Already in your list" : "Add to my servers")" @onclick="(() => AddGlobalToMyServers(g))">Add</button>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="d-block d-md-none">
+                        <div class="row g-2">
+                            @foreach (var g in globalServers)
+                            {
+                                <div class="col-12">
+                                    <div class="card">
+                                        <div class="card-body">
+                                            <div class="d-flex justify-content-between align-items-center">
+                                                <div>
+                                                    <div class="fw-semibold">@g.Name</div>
+                                                    <span class="badge bg-secondary me-1">@g.Type</span>
+                                                </div>
+                                                <button class="btn btn-sm btn-outline-primary" disabled="@g.AlreadyAdded" @onclick="(() => AddGlobalToMyServers(g))">Add</button>
+                                            </div>
+                                            <div class="mt-2 small text-break">
+                                                @if (g.Type == "sse")
+                                                {
+                                                    <div><span class="text-muted">URL:</span> @g.Url</div>
+                                                }
+                                                else
+                                                {
+                                                    <div><span class="text-muted">Command:</span> @g.Command</div>
+                                                }
+                                                @if (g.RequiredInputs.Count > 0)
+                                                {
+                                                    <div class="text-muted">inputs: @string.Join(", ", g.RequiredInputs)</div>
+                                                }
+                                                <details class="mt-1">
+                                                    <summary>Details</summary>
+                                                    <div><span class="text-muted">Args:</span> <code class="d-block">@g.ArgsJson</code></div>
+                                                    <div class="mt-1"><span class="text-muted">Env:</span> <code class="d-block">@g.EnvJson</code></div>
+                                                    <div class="mt-1"><span class="text-muted">Headers:</span> <code class="d-block">@g.HeadersJson</code></div>
+                                                </details>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                }
+
+                <hr />
+                <h5>MCP Servers</h5>
+                <div class="mb-2">
+                    <button class="btn btn-link p-0" type="button" data-bs-toggle="collapse" data-bs-target="#jsonHelp" aria-expanded="false" aria-controls="jsonHelp">
+                        How to format Args, Env, and Headers
+                    </button>
+                    <div class="collapse" id="jsonHelp">
+                        <div class="card card-body small">
+                            <ul class="mb-2">
+                                <li><strong>Args</strong>: JSON array of strings. Example: ["--flag","value"]</li>
+                                <li><strong>Env</strong>: JSON object of string:string. Example: {"API_KEY":"${"{input:api_token}"}"}</li>
+                                <li><strong>Headers</strong>: JSON object of string:string. Example: {"Authorization":"Bearer ${"{input:api_token}"}"}</li>
+                                <li><strong>stdio</strong>: use Command + Args + Env</li>
+                                <li><strong>sse</strong>: use Url + Headers</li>
+                                <li>Reference saved inputs with ${"{input:your_id}"}</li>
+                            </ul>
+                            <div class="mb-1"><strong>Tips</strong>:</div>
+                            <ul class="mb-0">
+                                <li>Click "Format" to pretty-print JSON for readability.</li>
+                                <li>Errors will appear below fields when JSON is invalid or has wrong shape.</li>
+                            </ul>
+                        </div>
+                    </div>
                 </div>
-                <div class="form-group">
-                    <label>Role:</label>
-                    <input type="text" class="form-control" value="@Enum.GetName(currentUser.Role)" disabled />
+                <p class="text-muted">Configure servers used by tools. Values for Args/Env/Headers should be JSON.</p>
+
+                <div class="table-responsive d-none d-md-block">
+                    <table class="table table-sm">
+                        <thead>
+                            <tr>
+                                <th>Enabled</th>
+                                <th>Name</th>
+                                <th>Type</th>
+                                <th>Command/URL</th>
+                                <th>Args (JSON)</th>
+                                <th>Env (JSON)</th>
+                                <th>Headers (JSON)</th>
+                                <th>Status</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var s in userMcpServers)
+                            {
+                                <tr>
+                                    <td>
+                                        <input type="checkbox" class="form-check-input" @bind="s.Enabled" />
+                                    </td>
+                                    <td>
+                                        <span class="fw-semibold">@s.Name</span>
+                                        @if (effectiveServers.Any(es => es.Used && string.Equals(es.Name, s.Name, StringComparison.OrdinalIgnoreCase) && es.Source == "User"))
+                                        {
+                                            <span class="badge bg-success ms-2">In effect</span>
+                                        }
+                                    </td>
+                                    <td>
+                                        <span>@s.Type</span>
+                                    </td>
+                                    <td class="text-break">
+                                        @if (s.Type == "sse")
+                                        {
+                                            <span>@s.Url</span>
+                                        }
+                                        else
+                                        {
+                                            <span>@s.Command</span>
+                                        }
+                                    </td>
+                                    <td class="small text-break">
+                                        <code class="d-block">@s.ArgsJson</code>
+                                    </td>
+                                    <td class="small text-break">
+                                        <code class="d-block">@s.EnvJson</code>
+                                    </td>
+                                    <td class="small text-break">
+                                        <code class="d-block">@s.HeadersJson</code>
+                                    </td>
+                                    <td class="text-center">
+                                        @if (GetStatus(s.Name) is null)
+                                        {
+                                            <span class="text-muted" title="No status yet">—</span>
+                                        }
+                                        else if (GetStatus(s.Name)?.Connected == true)
+                                        {
+                                            <span class="text-success" title="Connected" aria-label="Connected">&#9679;</span>
+                                        }
+                                        else
+                                        {
+                                            <span class="text-danger" title="@GetStatus(s.Name)?.ErrorMessage" aria-label="Error">&#9888;</span>
+                                        }
+                                    </td>
+                                    <td>
+                                        <div class="btn-group btn-group-sm">
+                                            <button class="btn btn-outline-primary" type="button" @onclick="(() => OpenEditor(s))">Edit</button>
+                                            <button class="btn btn-outline-danger" type="button" @onclick="(() => RemoveServer(s))">Delete</button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
                 </div>
-                <div class="form-group">
-                    <label>Requested:</label>
-                    <input type="text" class="form-control" value="@currentUser.DateRequested.ToShortDateString()" disabled />
+
+                <div class="d-block d-md-none">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <span class="text-muted">Your servers</span>
+                        <button class="btn btn-sm btn-primary" @onclick="(() => OpenEditor(null))">Add Server</button>
+                    </div>
+                    <div class="row g-2">
+                        @foreach (var s in userMcpServers)
+                        {
+                            <div class="col-12">
+                                <div class="card">
+                                    <div class="card-body">
+                                        <div class="d-flex justify-content-between align-items-center">
+                                            <div>
+                                                <div class="form-check form-switch">
+                                                    <input class="form-check-input" type="checkbox" @bind="s.Enabled" />
+                                                    <label class="form-check-label fw-semibold">@s.Name</label>
+                                                    @if (effectiveServers.Any(es => es.Used && string.Equals(es.Name, s.Name, StringComparison.OrdinalIgnoreCase) && es.Source == "User"))
+                                                    {
+                                                        <span class="badge bg-success ms-2">In effect</span>
+                                                    }
+                                                </div>
+                                                <span class="badge bg-secondary">@s.Type</span>
+                                            </div>
+                                            <div class="d-flex align-items-center gap-2">
+                                                @if (GetStatus(s.Name) is null)
+                                                {
+                                                    <span class="text-muted" title="No status">—</span>
+                                                }
+                                                else if (GetStatus(s.Name)?.Connected == true)
+                                                {
+                                                    <span class="text-success" title="Connected">&#9679;</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="text-danger" title="@GetStatus(s.Name)?.ErrorMessage">&#9888;</span>
+                                                }
+                                                <div class="btn-group">
+                                                    <button class="btn btn-sm btn-outline-primary" @onclick="(() => OpenEditor(s))">Edit</button>
+                                                    <button class="btn btn-sm btn-outline-danger" @onclick="(() => RemoveServer(s))">Delete</button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="mt-2 small text-break">
+                                            @if (s.Type == "sse")
+                                            {
+                                                <div><span class="text-muted">URL:</span> @s.Url</div>
+                                            }
+                                            else
+                                            {
+                                                <div><span class="text-muted">Command:</span> @s.Command</div>
+                                            }
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        }
+                    </div>
                 </div>
-                <div class="form-group">
-                    <label>Approved:</label>
-                    <input type="text" class="form-control" value="@(currentUser.DateApproved.HasValue?currentUser.DateApproved.Value.ToShortDateString():string.Empty)" disabled="true" />
-                </div>
-                <br/>
-                <button type="button" class="btn btn-primary" @onclick="SaveChanges">Save</button>
+
+                <button class="btn btn-secondary btn-sm d-none d-md-inline" @onclick="AddServer">Add Server</button>
+
+                <br />
+                <br />
+                <button type="button" class="btn btn-primary" @onclick="Save">Save</button>
                 <button type="button" class="btn btn-secondary" @onclick="Back">Back</button>
+
+                <hr />
+                <h5>Effective MCP Servers (used at runtime)</h5>
+                <div class="small text-muted mb-2">Precedence: User overrides Role, Role overrides Global. Identical configs are deduplicated.</div>
+                @if (effectiveServers.Count == 0 || !effectiveServers.Any(es => es.Used))
+                {
+                    <div class="text-muted">No effective MCP servers.</div>
+                }
+                else
+                {
+                    <div class="table-responsive">
+                        <table class="table table-sm align-middle">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Source</th>
+                                    <th>Type</th>
+                                    <th>Command/URL</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var es in effectiveServers.Where(e => e.Used))
+                                {
+                                    <tr>
+                                        <td class="fw-semibold">@es.Name</td>
+                                        <td>
+                                            @if (es.Source == "User") { <span class="badge bg-primary">User</span>; }
+                                            else if (es.Source == "Role") { <span class="badge bg-info text-dark">Role</span>; }
+                                            else { <span class="badge bg-secondary">Global</span>; }
+                                        </td>
+                                        <td>@es.Type</td>
+                                        <td class="text-break">@(es.Type == "sse" ? es.Url : es.Command)</td>
+                                        <td class="text-center">
+                                            @if (GetStatus(es.Name) is null)
+                                            {
+                                                <span class="text-muted" title="No status yet">—</span>
+                                            }
+                                            else if (GetStatus(es.Name)?.Connected == true)
+                                            {
+                                                <span class="text-success" title="Connected">&#9679;</span>
+                                            }
+                                            else
+                                            {
+                                                <span class="text-danger" title="@GetStatus(es.Name)?.ErrorMessage">&#9888;</span>
+                                            }
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+
+                <details class="mt-2">
+                    <summary class="small">Why some entries are not used</summary>
+                    @if (!effectiveServers.Any(e => !e.Used))
+                    {
+                        <div class="text-muted small">All candidates are used.</div>
+                    }
+                    else
+                    {
+                        <ul class="small mb-0">
+                            @foreach (var es in effectiveServers.Where(e => !e.Used))
+                            {
+                                <li>
+                                    <span class="fw-semibold">@es.Name</span> (<span>@es.Source</span>) — @es.Note
+                                </li>
+                            }
+                        </ul>
+                    }
+                </details>
             </div>
         </div>
     </div>
+
+    @* Offcanvas-like editor *@
+    @if (isEditorOpen)
+    {
+        <div class="offcanvas offcanvas-end show" tabindex="-1" style="visibility: visible; position: fixed; background: var(--bs-body-bg); width: 100%; max-width: 520px;" aria-modal="true" role="dialog">
+            <div class="offcanvas-header">
+                <h5 class="offcanvas-title">@(isNewServer ? "Add MCP Server" : "Edit MCP Server")</h5>
+                <button type="button" class="btn-close" aria-label="Close" @onclick="CancelEditor"></button>
+            </div>
+            <div class="offcanvas-body">
+                <div class="mb-2 form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="editorEnabled" @bind="editor.Enabled">
+                    <label class="form-check-label" for="editorEnabled">Enabled</label>
+                </div>
+                <div class="mb-2">
+                    <label class="form-label">Name</label>
+                    <input class="form-control" @bind="editor.Name" />
+                </div>
+                <div class="mb-2">
+                    <label class="form-label">Type</label>
+                    <select class="form-select" @bind="editor.Type">
+                        <option value="stdio">stdio</option>
+                        <option value="sse">sse</option>
+                    </select>
+                </div>
+                @if (editor.Type == "sse")
+                {
+                    <div class="mb-2">
+                        <label class="form-label">URL</label>
+                        <input class="form-control" placeholder="https://..." @bind="editor.Url" />
+                    </div>
+                }
+                else
+                {
+                    <div class="mb-2">
+                        <label class="form-label">Command</label>
+                        <input class="form-control" placeholder="binary or script" @bind="editor.Command" />
+                    </div>
+                }
+
+                <div class="mb-2">
+                    <label class="form-label">Args (JSON array)</label>
+                    <div class="d-flex gap-2">
+                        <textarea class="form-control" rows="3" @bind="editor.ArgsJson" @bind:event="oninput"></textarea>
+                        <button class="btn btn-outline-secondary" type="button" @onclick="(() => FormatEditorJson(nameof(editor.ArgsJson), mustBeArray: true))">Format</button>
+                    </div>
+                    @if (!string.IsNullOrEmpty(editorErrors.TryGetValue("ArgsJson", out var aErr) ? aErr : null))
+                    {
+                        <div class="text-danger small">@editorErrors["ArgsJson"]</div>
+                    }
+                </div>
+                <div class="mb-2">
+                    <label class="form-label">Env (JSON object)</label>
+                    <div class="d-flex gap-2">
+                        <textarea class="form-control" rows="3" @bind="editor.EnvJson" @bind:event="oninput"></textarea>
+                        <button class="btn btn-outline-secondary" type="button" @onclick="(() => FormatEditorJson(nameof(editor.EnvJson), mustBeObject: true))">Format</button>
+                    </div>
+                    @if (!string.IsNullOrEmpty(editorErrors.TryGetValue("EnvJson", out var eErr) ? eErr : null))
+                    {
+                        <div class="text-danger small">@editorErrors["EnvJson"]</div>
+                    }
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Headers (JSON object)</label>
+                    <div class="d-flex gap-2">
+                        <textarea class="form-control" rows="3" @bind="editor.HeadersJson" @bind:event="oninput"></textarea>
+                        <button class="btn btn-outline-secondary" type="button" @onclick="(() => FormatEditorJson(nameof(editor.HeadersJson), mustBeObject: true))">Format</button>
+                    </div>
+                    @if (!string.IsNullOrEmpty(editorErrors.TryGetValue("HeadersJson", out var hErr) ? hErr : null))
+                    {
+                        <div class="text-danger small">@editorErrors["HeadersJson"]</div>
+                    }
+                </div>
+
+                <div class="d-flex justify-content-between">
+                    <div>
+                        <button class="btn btn-primary" @onclick="ApplyEditor">Apply</button>
+                        <button class="btn btn-secondary ms-2" @onclick="CancelEditor">Cancel</button>
+                    </div>
+                    <button class="btn btn-outline-danger" disabled="@isNewServer" @onclick="DeleteFromEditor">Delete</button>
+                </div>
+            </div>
+        </div>
+        <div class="offcanvas-backdrop fade show" style="opacity:.5" @onclick="CancelEditor"></div>
+    }
 
     <Alert AlertType="@alertType" AlertMessage="@alertMessage" OnClose="CloseAlert" />
 }
 
 @code {
-
-
-    User? currentUser =null;
+    private User? currentUser;
     private string alertMessage { get; set; } = string.Empty;
     private string alertType { get; set; } = string.Empty;
+
+    private List<UserMcpServerConfig> userMcpServers = new();
+    private Dictionary<(Guid Id, string Field), string> jsonErrors = new();
+
+    // Dynamic MCP Inputs
+    private List<McpInputVm> mcpInputs = new();
+
+    // Global servers view model
+    private List<GlobalServerVm> globalServers = new();
+
+    // Effective servers preview
+    private List<EffectiveServerVm> effectiveServers = new();
+
+    // Statuses
+    private bool statusLoading = false;
+    private List<BlazorAIChat.Services.McpServerStatus> effectiveStatuses = new();
+
+    private bool disableIdentityFields => !AppOptions.Value.RequireEasyAuth;
+    private bool isGuestUser => currentUser is not null && (string.Equals(currentUser.Id, "guest", StringComparison.OrdinalIgnoreCase) || currentUser.Role == UserRoles.Guest);
+
+    private BlazorAIChat.Services.McpServerStatus? GetStatus(string name)
+    {
+        return effectiveStatuses.FirstOrDefault(s => string.Equals(s.Name, name, StringComparison.OrdinalIgnoreCase));
+    }
+
+    // Offcanvas editor state
+    private bool isEditorOpen = false;
+    private bool isNewServer = false;
+    private UserMcpServerConfig? editingTarget = null;
+    private EditorVm editor = new();
+    private Dictionary<string, string> editorErrors = new();
+
+    private Dictionary<string, List<string>> inputReferences = new();
+
+    // Inline JSON error helper (placed early so all methods can use it)
+    private void ShowInlineJsonError((Guid Id, string Field) key, string? message)
+    {
+        if (string.IsNullOrEmpty(message))
+        {
+            jsonErrors.Remove(key);
+        }
+        else
+        {
+            jsonErrors[key] = message;
+        }
+    }
+
+    private record McpInputVm
+    {
+        public string Id { get; init; } = string.Empty;
+        public string Description { get; init; } = string.Empty;
+        public string Type { get; init; } = "promptString";
+        public bool Password { get; init; }
+        public bool IsRequired { get; set; }
+        public string? EnteredValue { get; set; }
+        public bool HasSavedValue { get; set; }
+        public bool BoolValue { get; set; }
+        public double? NumberValue { get; set; }
+        public string? ValidationError { get; set; }
+    }
+
+    private record GlobalServerVm
+    {
+        public string Name { get; init; } = string.Empty;
+        public string Type { get; init; } = string.Empty;
+        public string? Command { get; init; }
+        public string? Url { get; init; }
+        public string ArgsJson { get; init; } = "[]";
+        public string EnvJson { get; init; } = "{}";
+        public string HeadersJson { get; init; } = "{}";
+        public List<string> RequiredInputs { get; init; } = new();
+        public bool AlreadyAdded { get; set; }
+    }
+
+    private record EditorVm
+    {
+        public bool Enabled { get; set; } = true;
+        public string Name { get; set; } = string.Empty;
+        public string Type { get; set; } = "stdio";
+        public string? Command { get; set; }
+        public string? Url { get; set; }
+        public string? ArgsJson { get; set; }
+        public string? EnvJson { get; set; }
+        public string? HeadersJson { get; set; }
+    }
+
+    private record EffectiveServerVm
+    {
+        public string Name { get; init; } = string.Empty;
+        public string Type { get; init; } = string.Empty;
+        public string? Command { get; init; }
+        public string? Url { get; init; }
+        public string Source { get; init; } = "Global"; // Global, Role, User
+        public bool Used { get; set; }
+        public string? Note { get; set; }
+        public int Rank { get; init; } // 1=Global,2=Role,3=User
+        public string Fingerprint { get; init; } = string.Empty;
+    }
 
     protected override async Task OnInitializedAsync()
     {
         await LoadCurrentUser();
+        if (currentUser != null)
+        {
+            EnforceGuestIdentity();
+            userMcpServers = dbContext.UserMcpServerConfigs.Where(x => x.UserId == currentUser.Id).OrderBy(x => x.Name).ToList();
+            await LoadMcpInputsAsync();
+            LoadGlobalServers();
+            RecomputeInputReferences();
+            RecomputeEffectiveServers();
+            // Do not await status at init; trigger after first render for responsiveness
+        }
+    }
 
+    protected override Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && currentUser != null)
+        {
+            _ = RefreshStatuses();
+        }
+        return Task.CompletedTask;
+    }
+
+    private async Task RefreshStatuses()
+    {
+        if (currentUser == null) return;
+        statusLoading = true;
+        StateHasChanged();
+        try
+        {
+            var list = await McpManager.GetServerStatusesAsync(currentUser.Id);
+            effectiveStatuses = list.ToList();
+        }
+        catch (Exception ex)
+        {
+            ShowAlert($"Failed to load MCP status: {ex.Message}", AlertTypeEnum.danger);
+        }
+        finally
+        {
+            statusLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private void LoadGlobalServers()
+    {
+        globalServers.Clear();
+        var servers = AppOptions.Value.Mcp?.Servers;
+        if (servers == null) return;
+        foreach (var kv in servers)
+        {
+            var name = kv.Key;
+            var s = kv.Value;
+            var argsJson = s.Args != null ? System.Text.Json.JsonSerializer.Serialize(s.Args) : "[]";
+            var envJson = s.Env != null ? System.Text.Json.JsonSerializer.Serialize(s.Env) : "{}";
+            var headersJson = s.Headers != null ? System.Text.Json.JsonSerializer.Serialize(s.Headers) : "{}";
+            var req = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (s.Args != null)
+            {
+                foreach (var a in s.Args) foreach (var id in ExtractInputIds(a)) req.Add(id);
+            }
+            if (s.Env != null)
+            {
+                foreach (var v in s.Env.Values) foreach (var id in ExtractInputIds(v)) req.Add(id);
+            }
+            if (s.Headers != null)
+            {
+                foreach (var v in s.Headers.Values) foreach (var id in ExtractInputIds(v)) req.Add(id);
+            }
+            if (!string.IsNullOrWhiteSpace(s.Command)) foreach (var id in ExtractInputIds(s.Command)) req.Add(id);
+            if (!string.IsNullOrWhiteSpace(s.Url)) foreach (var id in ExtractInputIds(s.Url)) req.Add(id);
+
+            var vm = new GlobalServerVm
+            {
+                Name = name,
+                Type = s.Type,
+                Command = s.Command,
+                Url = s.Url,
+                ArgsJson = argsJson,
+                EnvJson = envJson,
+                HeadersJson = headersJson,
+                RequiredInputs = req.ToList(),
+                AlreadyAdded = userMcpServers.Any(us => string.Equals(us.Name, name, StringComparison.OrdinalIgnoreCase))
+            };
+            globalServers.Add(vm);
+        }
+    }
+
+    private void AddGlobalToMyServers(GlobalServerVm g)
+    {
+        if (currentUser == null) return;
+        if (userMcpServers.Any(us => string.Equals(us.Name, g.Name, StringComparison.OrdinalIgnoreCase)))
+        {
+            g.AlreadyAdded = true;
+            return;
+        }
+        var server = new UserMcpServerConfig
+        {
+            UserId = currentUser.Id,
+            Name = g.Name,
+            Type = g.Type,
+            Command = g.Command,
+            Url = g.Url,
+            ArgsJson = g.ArgsJson,
+            EnvJson = g.EnvJson,
+            HeadersJson = g.HeadersJson,
+            Enabled = true,
+            UpdatedAt = DateTime.UtcNow
+        };
+        userMcpServers.Add(server);
+        g.AlreadyAdded = true;
+        UpdateRequiredFlags();
+        RecomputeEffectiveServers();
+        _ = RefreshStatuses();
+        StateHasChanged();
+    }
+
+    private void OpenEditor(UserMcpServerConfig? s)
+    {
+        editorErrors.Clear();
+        editingTarget = s;
+        isNewServer = s is null;
+        if (s is null)
+        {
+            editor = new EditorVm
+            {
+                Enabled = true,
+                Name = $"server-{userMcpServers.Count + 1}",
+                Type = "stdio",
+                ArgsJson = "[]",
+                EnvJson = "{}",
+                HeadersJson = "{}"
+            };
+        }
+        else
+        {
+            editor = new EditorVm
+            {
+                Enabled = s.Enabled,
+                Name = s.Name,
+                Type = s.Type,
+                Command = s.Command,
+                Url = s.Url,
+                ArgsJson = s.ArgsJson,
+                EnvJson = s.EnvJson,
+                HeadersJson = s.HeadersJson
+            };
+        }
+        isEditorOpen = true;
+    }
+
+    private void CancelEditor()
+    {
+        isEditorOpen = false;
+        editorErrors.Clear();
+    }
+
+    private void DeleteFromEditor()
+    {
+        if (editingTarget != null)
+        {
+            RemoveServer(editingTarget);
+        }
+        CancelEditor();
+    }
+
+    private void ApplyEditor()
+    {
+        if (!ValidateEditor()) return;
+        if (editingTarget is null)
+        {
+            if (currentUser == null) return;
+            var server = new UserMcpServerConfig
+            {
+                UserId = currentUser.Id,
+                Name = editor.Name,
+                Type = editor.Type,
+                Command = editor.Command,
+                Url = editor.Url,
+                ArgsJson = editor.ArgsJson,
+                EnvJson = editor.EnvJson,
+                HeadersJson = editor.HeadersJson,
+                Enabled = editor.Enabled,
+                UpdatedAt = DateTime.UtcNow
+            };
+            userMcpServers.Add(server);
+        }
+        else
+        {
+            editingTarget.Enabled = editor.Enabled;
+            editingTarget.Name = editor.Name;
+            editingTarget.Type = editor.Type;
+            editingTarget.Command = editor.Command;
+            editingTarget.Url = editor.Url;
+            editingTarget.ArgsJson = editor.ArgsJson;
+            editingTarget.EnvJson = editor.EnvJson;
+            editingTarget.HeadersJson = editor.HeadersJson;
+            editingTarget.UpdatedAt = DateTime.UtcNow;
+        }
+        UpdateRequiredFlags();
+        foreach (var g in globalServers)
+        {
+            g.AlreadyAdded = userMcpServers.Any(us => string.Equals(us.Name, g.Name, StringComparison.OrdinalIgnoreCase));
+        }
+        RecomputeEffectiveServers();
+        _ = RefreshStatuses();
+        isEditorOpen = false;
+    }
+
+    private bool ValidateEditor()
+    {
+        editorErrors.Clear();
+        if (!string.IsNullOrWhiteSpace(editor.ArgsJson))
+        {
+            if (!TryValidateJson(editor.ArgsJson, Guid.Empty, nameof(editor.ArgsJson), allowNull: true, mustBeArray: true))
+            {
+                editorErrors[nameof(editor.ArgsJson)] = "Must be a JSON array";
+            }
+        }
+        if (!string.IsNullOrWhiteSpace(editor.EnvJson))
+        {
+            if (!TryValidateJson(editor.EnvJson, Guid.Empty, nameof(editor.EnvJson), allowNull: true, mustBeObject: true))
+            {
+                editorErrors[nameof(editor.EnvJson)] = "Must be a JSON object";
+            }
+        }
+        if (!string.IsNullOrWhiteSpace(editor.HeadersJson))
+        {
+            if (!TryValidateJson(editor.HeadersJson, Guid.Empty, nameof(editor.HeadersJson), allowNull: true, mustBeObject: true))
+            {
+                editorErrors[nameof(editor.HeadersJson)] = "Must be a JSON object";
+            }
+        }
+        StateHasChanged();
+        return editorErrors.Count == 0;
+    }
+
+    private void FormatEditorJson(string field, bool mustBeArray = false, bool mustBeObject = false)
+    {
+        string? val = field switch
+        {
+            nameof(editor.ArgsJson) => editor.ArgsJson,
+            nameof(editor.EnvJson) => editor.EnvJson,
+            nameof(editor.HeadersJson) => editor.HeadersJson,
+            _ => null
+        };
+        if (string.IsNullOrWhiteSpace(val)) return;
+        try
+        {
+            var element = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(val);
+            if (mustBeArray && element.ValueKind != System.Text.Json.JsonValueKind.Array)
+            {
+                editorErrors[field] = "Must be a JSON array";
+                return;
+            }
+            if (mustBeObject && element.ValueKind != System.Text.Json.JsonValueKind.Object)
+            {
+                editorErrors[field] = "Must be a JSON object";
+                return;
+            }
+            var formatted = System.Text.Json.JsonSerializer.Serialize(element, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+            switch (field)
+            {
+                case nameof(editor.ArgsJson): editor.ArgsJson = formatted; break;
+                case nameof(editor.EnvJson): editor.EnvJson = formatted; break;
+                case nameof(editor.HeadersJson): editor.HeadersJson = formatted; break;
+            }
+            if (editorErrors.ContainsKey(field)) editorErrors.Remove(field);
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            editorErrors[field] = $"Invalid JSON: {ex.Message}";
+        }
+    }
+
+    private async Task LoadMcpInputsAsync()
+    {
+        mcpInputs.Clear();
+        var cfgInputs = AppOptions.Value.Mcp?.Inputs ?? new();
+        var existing = dbContext.UserMcpInputValues.Where(x => x.UserId == currentUser!.Id).ToList();
+        var protector = new BlazorAIChat.Services.DpapiSecureStorage();
+
+        var requiredIds = ComputeRequiredInputIds();
+
+        foreach (var def in cfgInputs)
+        {
+            var vm = new McpInputVm
+            {
+                Id = def.Id,
+                Description = def.Description,
+                Type = string.IsNullOrWhiteSpace(def.Type) ? "promptString" : def.Type,
+                Password = def.Password,
+                IsRequired = requiredIds.Contains(def.Id)
+            };
+
+            var saved = existing.FirstOrDefault(x => x.InputId == def.Id);
+            if (saved != null)
+            {
+                vm.HasSavedValue = true;
+                if (!vm.Password)
+                {
+                    var raw = protector.UnprotectOrNull(saved.ProtectedValue) ?? string.Empty;
+                    if (string.Equals(vm.Type, "boolean", StringComparison.OrdinalIgnoreCase))
+                    {
+                        vm.BoolValue = bool.TryParse(raw, out var b) && b;
+                    }
+                    else if (string.Equals(vm.Type, "number", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (double.TryParse(raw, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var n))
+                            vm.NumberValue = n;
+                        vm.EnteredValue = raw;
+                    }
+                    else
+                    {
+                        vm.EnteredValue = raw;
+                    }
+                }
+            }
+
+            mcpInputs.Add(vm);
+        }
+    }
+
+    private HashSet<string> ComputeRequiredInputIds()
+    {
+        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var s in userMcpServers)
+        {
+            var fields = new[] { s.ArgsJson, s.EnvJson, s.HeadersJson, s.Command, s.Url };
+            foreach (var f in fields)
+            {
+                if (string.IsNullOrWhiteSpace(f)) continue;
+                foreach (var id in ExtractInputIds(f)) set.Add(id);
+            }
+        }
+        var servers = AppOptions.Value.Mcp?.Servers;
+        if (servers != null)
+        {
+            foreach (var kvp in servers)
+            {
+                var s = kvp.Value;
+                if (s.Args != null)
+                {
+                    foreach (var a in s.Args)
+                    {
+                        foreach (var id in ExtractInputIds(a)) set.Add(id);
+                    }
+                }
+                if (s.Env != null)
+                {
+                    foreach (var v in s.Env.Values)
+                    {
+                        foreach (var id in ExtractInputIds(v)) set.Add(id);
+                    }
+                }
+                if (!string.IsNullOrWhiteSpace(s.Command))
+                {
+                    foreach (var id in ExtractInputIds(s.Command)) set.Add(id);
+                }
+                if (!string.IsNullOrWhiteSpace(s.Url))
+                {
+                    foreach (var id in ExtractInputIds(s.Url)) set.Add(id);
+                }
+                if (s.Headers != null)
+                {
+                    foreach (var v in s.Headers.Values)
+                    {
+                        foreach (var id in ExtractInputIds(v)) set.Add(id);
+                    }
+                }
+            }
+        }
+        return set;
     }
 
     private async Task LoadCurrentUser()
@@ -84,24 +1054,367 @@
         }
     }
 
+    private void EnforceGuestIdentity()
+    {
+        if (currentUser is null) return;
+        if (isGuestUser || !AppOptions.Value.RequireEasyAuth)
+        {
+            currentUser.Name = "guest";
+            currentUser.Email = string.Empty;
+        }
+    }
+
+    private void AddServer()
+    {
+        if (currentUser == null) return;
+        userMcpServers.Add(new UserMcpServerConfig{ UserId = currentUser.Id, Name = $"server-{userMcpServers.Count+1}", Type = "stdio", Enabled = true });
+        RecomputeInputReferences();
+        UpdateRequiredFlags();
+        RecomputeEffectiveServers();
+        _ = RefreshStatuses();
+    }
+
+    private void RemoveServer(UserMcpServerConfig s)
+    {
+        userMcpServers.Remove(s);
+        if (s.Id != Guid.Empty)
+        {
+            dbContext.UserMcpServerConfigs.Remove(s);
+        }
+        RecomputeInputReferences();
+        UpdateRequiredFlags();
+        foreach (var g in globalServers)
+        {
+            g.AlreadyAdded = userMcpServers.Any(us => string.Equals(us.Name, g.Name, StringComparison.OrdinalIgnoreCase));
+        }
+        RecomputeEffectiveServers();
+        _ = RefreshStatuses();
+    }
+
+    private async Task Save()
+    {
+        // Enforce identity constraints before persisting
+        EnforceGuestIdentity();
+        await SaveChanges();
+    }
+
     private async Task SaveChanges()
     {
         if (currentUser != null && !string.IsNullOrEmpty(currentUser.Id))
         {
-            var trackedEntity = dbContext.ChangeTracker.Entries<User>().FirstOrDefault(e => e.Entity.Id == currentUser.Id);
-            if (trackedEntity == null)
+            if (!ValidateAllJson())
             {
-                dbContext.Attach(currentUser);
-                dbContext.Entry(currentUser).State = EntityState.Modified;
+                ShowAlert("Fix JSON validation errors before saving.", AlertTypeEnum.danger);
+                return;
+            }
+
+            if (!ValidateMcpInputs())
+            {
+                ShowAlert("Fix MCP input validation errors before saving.", AlertTypeEnum.danger);
+                return;
+            }
+
+            // Upsert the current user to avoid concurrency exceptions when the row doesn't exist yet
+            var userExists = await dbContext.Users.AsNoTracking().AnyAsync(u => u.Id == currentUser.Id);
+            if (userExists)
+            {
+                dbContext.Users.Update(currentUser);
             }
             else
             {
-                dbContext.Entry(trackedEntity.Entity).CurrentValues.SetValues(currentUser);
+                dbContext.Users.Add(currentUser);
+            }
+
+            // Upsert each user MCP server config robustly
+            foreach (var s in userMcpServers)
+            {
+                s.UpdatedAt = DateTime.UtcNow;
+                var isNew = s.Id == Guid.Empty || !dbContext.UserMcpServerConfigs.AsNoTracking().Any(e => e.Id == s.Id);
+                if (isNew)
+                {
+                    if (s.CreatedAt == default) s.CreatedAt = DateTime.UtcNow;
+                    dbContext.UserMcpServerConfigs.Add(s);
+                }
+                else
+                {
+                    dbContext.UserMcpServerConfigs.Update(s);
+                }
+            }
+
+            // If there are any tracked deletions for user MCP server configs where the row no longer exists,
+            // detach them so EF won't throw a concurrency exception (treat as already deleted)
+            var deletedServerEntries = dbContext.ChangeTracker.Entries<UserMcpServerConfig>()
+                                                .Where(e => e.State == EntityState.Deleted)
+                                                .ToList();
+            foreach (var entry in deletedServerEntries)
+            {
+                var id = entry.Entity.Id;
+                var exists = await dbContext.UserMcpServerConfigs.AsNoTracking().AnyAsync(x => x.Id == id);
+                if (!exists)
+                {
+                    entry.State = EntityState.Detached;
+                }
+            }
+
+            // Upsert MCP input values securely
+            var existing = dbContext.UserMcpInputValues.Where(x => x.UserId == currentUser.Id).ToDictionary(x => x.InputId, StringComparer.OrdinalIgnoreCase);
+            var protector = new BlazorAIChat.Services.DpapiSecureStorage();
+            foreach (var vm in mcpInputs)
+            {
+                string? toStore = null;
+                if (string.Equals(vm.Type, "boolean", StringComparison.OrdinalIgnoreCase))
+                {
+                    toStore = vm.BoolValue ? "true" : "false";
+                }
+                else if (string.Equals(vm.Type, "number", StringComparison.OrdinalIgnoreCase))
+                {
+                    toStore = vm.NumberValue?.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                }
+                else
+                {
+                    // promptString, url, or unknown
+                    if (vm.Password)
+                    {
+                        // Only overwrite when a new value is provided
+                        if (!string.IsNullOrEmpty(vm.EnteredValue))
+                        {
+                            toStore = vm.EnteredValue;
+                        }
+                    }
+                    else
+                    {
+                        toStore = vm.EnteredValue ?? string.Empty;
+                    }
+                }
+
+                if (toStore is null)
+                {
+                    continue; // skip overwriting password when empty
+                }
+
+                var protectedVal = protector.Protect(toStore);
+                if (existing.TryGetValue(vm.Id, out var row))
+                {
+                    row.ProtectedValue = protectedVal;
+                    row.UpdatedAt = DateTime.UtcNow;
+                    dbContext.UserMcpInputValues.Update(row);
+                }
+                else
+                {
+                    dbContext.UserMcpInputValues.Add(new UserMcpInputValue
+                    {
+                        UserId = currentUser.Id,
+                        InputId = vm.Id,
+                        ProtectedValue = protectedVal,
+                        UpdatedAt = DateTime.UtcNow
+                    });
+                }
             }
 
             await dbContext.SaveChangesAsync();
-            ShowAlert("User profile updated successfully", AlertTypeEnum.success);
+
+            // Lazy refresh: drop any cached MCP connections so next chat uses new settings
+            await McpManager.DisconnectUserAsync(currentUser.Id);
+
+            ShowAlert("Profile, inputs, and MCP servers updated.", AlertTypeEnum.success);
+            await LoadMcpInputsAsync(); // refresh saved flags/values
+            RecomputeInputReferences();
+            RecomputeEffectiveServers();
+            await RefreshStatuses();
             StateHasChanged();
+        }
+    }
+
+    private bool ValidateAllJson()
+    {
+        jsonErrors.Clear();
+        foreach (var s in userMcpServers)
+        {
+            _ = TryValidateJson(s.ArgsJson, s.Id, nameof(s.ArgsJson), allowNull: true, mustBeArray: true);
+            _ = TryValidateJson(s.EnvJson, s.Id, nameof(s.EnvJson), allowNull: true, mustBeObject: true);
+            _ = TryValidateJson(s.HeadersJson, s.Id, nameof(s.HeadersJson), allowNull: true, mustBeObject: true);
+        }
+        return jsonErrors.Count == 0;
+    }
+
+    private bool ValidateMcpInputs()
+    {
+        var ok = true;
+        foreach (var vm in mcpInputs)
+        {
+            vm.ValidationError = null;
+            if (vm.IsRequired)
+            {
+                bool hasValue = vm.Password ? vm.HasSavedValue || !string.IsNullOrEmpty(vm.EnteredValue)
+                                             : string.Equals(vm.Type, "boolean", StringComparison.OrdinalIgnoreCase) ? true
+                                             : string.Equals(vm.Type, "number", StringComparison.OrdinalIgnoreCase) ? (vm.NumberValue.HasValue || !string.IsNullOrEmpty(vm.EnteredValue))
+                                             : !string.IsNullOrEmpty(vm.EnteredValue);
+                if (!hasValue)
+                {
+                    vm.ValidationError = "This input is required.";
+                    ok = false;
+                    continue;
+                }
+            }
+
+            if (string.Equals(vm.Type, "url", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!string.IsNullOrWhiteSpace(vm.EnteredValue) && !Uri.IsWellFormedUriString(vm.EnteredValue, UriKind.Absolute))
+                {
+                    vm.ValidationError = "Enter a valid absolute URL.";
+                    ok = false;
+                }
+            }
+            else if (string.Equals(vm.Type, "number", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!vm.NumberValue.HasValue && !string.IsNullOrWhiteSpace(vm.EnteredValue))
+                {
+                    if (!double.TryParse(vm.EnteredValue, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var n))
+                    {
+                        vm.ValidationError = "Enter a valid number.";
+                        ok = false;
+                    }
+                    else
+                    {
+                        vm.NumberValue = n;
+                    }
+                }
+            }
+            else if (string.Equals(vm.Type, "boolean", StringComparison.OrdinalIgnoreCase))
+            {
+                // checkbox already constrained
+            }
+            // promptString and unknown types need no extra validation
+        }
+        return ok;
+    }
+
+    private void OnJsonChanged(ChangeEventArgs e, UserMcpServerConfig s, string field)
+    {
+        var val = e.Value?.ToString();
+        switch (field)
+        {
+            case nameof(UserMcpServerConfig.ArgsJson): s.ArgsJson = val; break;
+            case nameof(UserMcpServerConfig.EnvJson): s.EnvJson = val; break;
+            case nameof(UserMcpServerConfig.HeadersJson): s.HeadersJson = val; break;
+        }
+        ValidateJsonField(val, s, field);
+        RecomputeInputReferences();
+        UpdateRequiredFlags();
+        RecomputeEffectiveServers();
+        _ = RefreshStatuses();
+    }
+
+    private void OnServerFieldChanged()
+    {
+        RecomputeInputReferences();
+        UpdateRequiredFlags();
+        RecomputeEffectiveServers();
+        _ = RefreshStatuses();
+    }
+
+    private void UpdateRequiredFlags()
+    {
+        var required = ComputeRequiredInputIds();
+        foreach (var vm in mcpInputs)
+        {
+            vm.IsRequired = required.Contains(vm.Id);
+        }
+        StateHasChanged();
+    }
+
+    private void ValidateJsonField(string? val, UserMcpServerConfig s, string field)
+    {
+        bool ok = field switch
+        {
+            nameof(UserMcpServerConfig.ArgsJson) => TryValidateJson(val, s.Id, field, true, mustBeArray: true),
+            nameof(UserMcpServerConfig.EnvJson) => TryValidateJson(val, s.Id, field, true, mustBeObject: true),
+            nameof(UserMcpServerConfig.HeadersJson) => TryValidateJson(val, s.Id, field, true, mustBeObject: true),
+            _ => true
+        };
+        if (ok)
+        {
+            ShowInlineJsonError((s.Id, field), null);
+        }
+        StateHasChanged();
+    }
+
+    private bool TryValidateJson(string? json, Guid id, string field, bool allowNull = true, bool mustBeArray = false, bool mustBeObject = false)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            if (allowNull) return true;
+            ShowInlineJsonError((id, field), "Value required");
+            return false;
+        }
+        try
+        {
+            var doc = System.Text.Json.JsonDocument.Parse(json);
+            if (mustBeArray && doc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Array)
+            {
+                ShowInlineJsonError((id, field), "Must be a JSON array");
+                return false;
+            }
+            if (mustBeObject && doc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Object)
+            {
+                ShowInlineJsonError((id, field), "Must be a JSON object");
+                return false;
+            }
+            return true;
+        }
+        catch (Exception ex)
+        {
+            ShowInlineJsonError((id, field), $"Invalid JSON: {ex.Message}");
+            return false;
+        }
+    }
+
+    private void FormatJsonField(UserMcpServerConfig s, string field, bool mustBeArray = false, bool mustBeObject = false)
+    {
+        string? val = field switch
+        {
+            nameof(UserMcpServerConfig.ArgsJson) => s.ArgsJson,
+            nameof(UserMcpServerConfig.EnvJson) => s.EnvJson,
+            nameof(UserMcpServerConfig.HeadersJson) => s.HeadersJson,
+            _ => null
+        };
+        if (string.IsNullOrWhiteSpace(val)) return;
+        try
+        {
+            var element = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(val);
+            if (mustBeArray && element.ValueKind != System.Text.Json.JsonValueKind.Array)
+            {
+                ShowInlineJsonError((s.Id, field), "Must be a JSON array");
+                return;
+            }
+            if (mustBeObject && element.ValueKind != System.Text.Json.JsonValueKind.Object)
+            {
+                ShowInlineJsonError((s.Id, field), "Must be a JSON object");
+                return;
+            }
+            var formatted = System.Text.Json.JsonSerializer.Serialize(element, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+            switch (field)
+            {
+                case nameof(UserMcpServerConfig.ArgsJson): s.ArgsJson = formatted; break;
+                case nameof(UserMcpServerConfig.EnvJson): s.EnvJson = formatted; break;
+                case nameof(UserMcpServerConfig.HeadersJson): s.HeadersJson = formatted; break;
+            }
+            ShowInlineJsonError((s.Id, field), null);
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            ShowInlineJsonError((s.Id, field), $"Invalid JSON: {ex.Message}");
+        }
+    }
+
+    private async Task DisconnectMyMcp()
+    {
+        if (currentUser?.Id is string uid && !string.IsNullOrEmpty(uid))
+        {
+            await McpManager.DisconnectUserAsync(uid);
+            await RefreshStatuses();
+            ShowAlert("Disconnected your MCP connections.", AlertTypeEnum.success);
         }
     }
 
@@ -112,7 +1425,6 @@
 
     private void ShowAlert(string message, AlertTypeEnum alertType = AlertTypeEnum.info)
     {
-
         alertMessage += message + " ";
         this.alertType = "alert-" + (Enum.GetName(typeof(AlertTypeEnum), alertType)?.ToLower() ?? "warning");
         StateHasChanged();
@@ -123,5 +1435,170 @@
         alertMessage = string.Empty;
         alertType = string.Empty;
         StateHasChanged();
+    }
+
+    private void RecomputeInputReferences()
+    {
+        inputReferences.Clear();
+        foreach (var s in userMcpServers)
+        {
+            var fields = new List<(string? content, string serverName)>
+            {
+                (s.ArgsJson, s.Name),
+                (s.EnvJson, s.Name),
+                (s.HeadersJson, s.Name),
+                (s.Command, s.Name),
+                (s.Url, s.Name)
+            };
+            foreach (var (content, serverName) in fields)
+            {
+                if (string.IsNullOrWhiteSpace(content)) continue;
+                foreach (var id in ExtractInputIds(content))
+                {
+                    if (!inputReferences.TryGetValue(id, out var list))
+                    {
+                        list = new List<string>();
+                        inputReferences[id] = list;
+                    }
+                    if (!list.Contains(serverName, StringComparer.OrdinalIgnoreCase))
+                    {
+                        list.Add(serverName);
+                    }
+                }
+            }
+        }
+    }
+
+    private void RecomputeEffectiveServers()
+    {
+        effectiveServers.Clear();
+        if (currentUser == null) return;
+
+        // Build candidates
+        var candidates = new List<EffectiveServerVm>();
+
+        // Global rank 1
+        var global = AppOptions.Value.Mcp?.Servers;
+        if (global != null)
+        {
+            foreach (var kv in global)
+            {
+                var type = kv.Value.Type ?? string.Empty;
+                var cfgArgs = kv.Value.Args != null ? System.Text.Json.JsonSerializer.Serialize(kv.Value.Args) : null;
+                var cfgEnv = kv.Value.Env != null ? System.Text.Json.JsonSerializer.Serialize(kv.Value.Env) : null;
+                var cfgHeaders = kv.Value.Headers != null ? System.Text.Json.JsonSerializer.Serialize(kv.Value.Headers) : null;
+                var fp = ComputeFingerprint(type, kv.Value.Command, cfgArgs, cfgEnv, kv.Value.Url, cfgHeaders);
+                candidates.Add(new EffectiveServerVm { Name = kv.Key, Type = type, Command = kv.Value.Command, Url = kv.Value.Url, Source = "Global", Rank = 1, Fingerprint = fp, Used = true });
+            }
+        }
+
+        // Role rank 2
+        var role = dbContext.Users.Where(u => u.Id == currentUser.Id).Select(u => u.Role).FirstOrDefault();
+        var roleDefaults = dbContext.RoleMcpServerConfigs.Where(r => r.Role == role && r.Enabled).ToList();
+        foreach (var r in roleDefaults)
+        {
+            var fp = ComputeFingerprint(r.Type, r.Command, r.ArgsJson, r.EnvJson, r.Url, r.HeadersJson);
+            candidates.Add(new EffectiveServerVm { Name = r.Name, Type = r.Type, Command = r.Command, Url = r.Url, Source = "Role", Rank = 2, Fingerprint = fp, Used = true });
+        }
+
+        // User rank 3
+        foreach (var u in userMcpServers.Where(x => x.Enabled))
+        {
+            var fp = ComputeFingerprint(u.Type, u.Command, u.ArgsJson, u.EnvJson, u.Url, u.HeadersJson);
+            candidates.Add(new EffectiveServerVm { Name = u.Name, Type = u.Type, Command = u.Command, Url = u.Url, Source = "User", Rank = 3, Fingerprint = fp, Used = true });
+        }
+
+        // Same-name precedence
+        var byName = new Dictionary<string, EffectiveServerVm>(StringComparer.OrdinalIgnoreCase);
+        foreach (var c in candidates.OrderByDescending(c => c.Rank))
+        {
+            if (!byName.ContainsKey(c.Name))
+            {
+                byName[c.Name] = c;
+            }
+            else
+            {
+                c.Used = false;
+                c.Note = $"Overridden by {byName[c.Name].Source} config with same name";
+            }
+        }
+
+        // Identical-config dedupe across used items
+        var seen = new Dictionary<string, EffectiveServerVm>(StringComparer.Ordinal);
+        foreach (var c in candidates.Where(x => x.Used).OrderByDescending(c => c.Rank).ThenBy(c => c.Name, StringComparer.OrdinalIgnoreCase))
+        {
+            if (!seen.TryGetValue(c.Fingerprint, out var kept))
+            {
+                seen[c.Fingerprint] = c;
+            }
+            else
+            {
+                c.Used = false;
+                c.Note = $"Deduplicated; identical to '{kept.Name}' ({kept.Source})";
+            }
+        }
+
+        effectiveServers = candidates.OrderByDescending(c => c.Used)
+                                     .ThenByDescending(c => c.Rank)
+                                     .ThenBy(c => c.Name, StringComparer.OrdinalIgnoreCase)
+                                     .ToList();
+    }
+
+    private static string NormalizeJsonArray(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return "[]";
+        try
+        {
+            var el = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(json);
+            if (el.ValueKind != System.Text.Json.JsonValueKind.Array) return "[]";
+            return System.Text.Json.JsonSerializer.Serialize(el, new System.Text.Json.JsonSerializerOptions { WriteIndented = false });
+        }
+        catch { return "[]"; }
+    }
+
+    private static string NormalizeJsonObject(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return "{}";
+        try
+        {
+            var dict = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(json) ?? new();
+            var ordered = dict.OrderBy(kvp => kvp.Key, StringComparer.Ordinal);
+            var sb = new System.Text.StringBuilder();
+            foreach (var kv in ordered)
+            {
+                sb.Append(kv.Key).Append('\u0001').Append(kv.Value).Append('\u0002');
+            }
+            return sb.ToString();
+        }
+        catch { return "{}"; }
+    }
+
+    private static string ComputeFingerprint(string? type, string? command, string? argsJson, string? envJson, string? url, string? headersJson)
+    {
+        var t = (type ?? string.Empty).Trim().ToLowerInvariant();
+        var key = new System.Text.StringBuilder();
+        key.Append(t).Append('|');
+        if (string.Equals(t, "sse", StringComparison.OrdinalIgnoreCase)) key.Append((url ?? string.Empty).Trim()); else key.Append((command ?? string.Empty).Trim());
+        key.Append('|');
+        key.Append(NormalizeJsonArray(argsJson)).Append('|');
+        key.Append(NormalizeJsonObject(envJson)).Append('|');
+        key.Append(NormalizeJsonObject(headersJson));
+        using var sha = System.Security.Cryptography.SHA256.Create();
+        var bytes = sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(key.ToString()));
+        return Convert.ToHexString(bytes);
+    }
+
+    private static IEnumerable<string> ExtractInputIds(string text)
+    {
+        // match ${input:some_id}
+        var matches = System.Text.RegularExpressions.Regex.Matches(text, "\\$\\{input:([^}]+)\\}");
+        foreach (System.Text.RegularExpressions.Match m in matches)
+        {
+            if (m.Success && m.Groups.Count > 1)
+            {
+                var id = m.Groups[1].Value.Trim();
+                if (!string.IsNullOrEmpty(id)) yield return id;
+            }
+        }
     }
 }

@@ -1,0 +1,451 @@
+@page "/admin/mcp-defaults"
+@attribute [Authorize(Roles = nameof(UserRoles.Admin))]
+@rendermode InteractiveServer
+@using BlazorAIChat.Models
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.EntityFrameworkCore
+@inject AIChatDBContext DbContext
+@inject NavigationManager Nav
+
+<div class="admin-container">
+    <h3>Role MCP Defaults</h3>
+
+    <div class="mb-3 w-50">
+        <label class="form-label">Role</label>
+        <select class="form-select" @onchange="OnRoleChanged">
+            @foreach (var role in Enum.GetValues(typeof(UserRoles)).Cast<UserRoles>())
+            {
+                <option value="@role" selected="@(role == selectedRole)">@Enum.GetName(typeof(UserRoles), role)</option>
+            }
+        </select>
+    </div>
+
+    <div class="d-flex align-items-center justify-content-between mb-2">
+        <div class="d-flex align-items-center gap-2">
+            <button class="btn btn-sm btn-primary" @onclick="(() => OpenEditor(null))">Add Server</button>
+            <span class="text-muted">Defaults applied to users with the selected role.</span>
+        </div>
+    </div>
+
+    <div class="table-responsive d-none d-md-block">
+        <table class="table table-sm align-middle">
+            <thead>
+                <tr>
+                    <th>Enabled</th>
+                    <th>Name</th>
+                    <th>Type</th>
+                    <th>Command/URL</th>
+                    <th>Args (JSON)</th>
+                    <th>Env (JSON)</th>
+                    <th>Headers (JSON)</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @if (servers.Count == 0)
+                {
+                    <tr>
+                        <td colspan="8" class="text-center text-muted">No role defaults configured.</td>
+                    </tr>
+                }
+                else
+                {
+                    @foreach (var s in servers)
+                    {
+                        <tr>
+                            <td>
+                                <input type="checkbox" class="form-check-input" @bind="s.Enabled" />
+                            </td>
+                            <td>
+                                <span class="fw-semibold">@s.Name</span>
+                            </td>
+                            <td>
+                                <span>@s.Type</span>
+                            </td>
+                            <td class="text-break">
+                                @if (s.Type == "sse")
+                                {
+                                    <span>@s.Url</span>
+                                }
+                                else
+                                {
+                                    <span>@s.Command</span>
+                                }
+                            </td>
+                            <td class="small text-break">
+                                <code class="d-block">@s.ArgsJson</code>
+                            </td>
+                            <td class="small text-break">
+                                <code class="d-block">@s.EnvJson</code>
+                            </td>
+                            <td class="small text-break">
+                                <code class="d-block">@s.HeadersJson</code>
+                            </td>
+                            <td>
+                                <div class="btn-group btn-group-sm">
+                                    <button class="btn btn-outline-primary" type="button" @onclick="(() => OpenEditor(s))">Edit</button>
+                                    <button class="btn btn-outline-danger" type="button" @onclick="(() => RemoveServer(s))">Delete</button>
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                }
+            </tbody>
+        </table>
+    </div>
+
+    <div class="d-block d-md-none">
+        @if (servers.Count == 0)
+        {
+            <div class="alert alert-light text-muted">No role defaults configured.</div>
+        }
+        else
+        {
+            <div class="row g-2">
+                @foreach (var s in servers)
+                {
+                    <div class="col-12">
+                        <div class="card">
+                            <div class="card-body">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <div>
+                                        <div class="form-check form-switch">
+                                            <input class="form-check-input" type="checkbox" @bind="s.Enabled" />
+                                            <label class="form-check-label fw-semibold">@s.Name</label>
+                                        </div>
+                                        <span class="badge bg-secondary">@s.Type</span>
+                                    </div>
+                                    <div class="btn-group">
+                                        <button class="btn btn-sm btn-outline-primary" @onclick="(() => OpenEditor(s))">Edit</button>
+                                        <button class="btn btn-sm btn-outline-danger" @onclick="(() => RemoveServer(s))">Delete</button>
+                                    </div>
+                                </div>
+                                <div class="mt-2 small text-break">
+                                    @if (s.Type == "sse")
+                                    {
+                                        <div><span class="text-muted">URL:</span> @s.Url</div>
+                                    }
+                                    else
+                                    {
+                                        <div><span class="text-muted">Command:</span> @s.Command</div>
+                                    }
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+    </div>
+
+    <div class="mt-3">
+        <button class="btn btn-success" @onclick="SaveChanges">Save</button>
+        <button class="btn btn-secondary ms-2" @onclick="GoBack">Back</button>
+    </div>
+</div>
+
+@* Offcanvas-like editor *@
+@if (isEditorOpen)
+{
+    <div class="offcanvas offcanvas-end show" tabindex="-1" style="visibility: visible; position: fixed; background: var(--bs-body-bg); width: 100%; max-width: 520px;" aria-modal="true" role="dialog">
+        <div class="offcanvas-header">
+            <h5 class="offcanvas-title">@(isNewServer ? "Add Role MCP Server" : "Edit Role MCP Server")</h5>
+            <button type="button" class="btn-close" aria-label="Close" @onclick="CancelEditor"></button>
+        </div>
+        <div class="offcanvas-body">
+            <div class="mb-2 form-check form-switch">
+                <input class="form-check-input" type="checkbox" id="editorEnabled" @bind="editor.Enabled">
+                <label class="form-check-label" for="editorEnabled">Enabled</label>
+            </div>
+            <div class="mb-2">
+                <label class="form-label">Name</label>
+                <input class="form-control" @bind="editor.Name" />
+            </div>
+            <div class="mb-2">
+                <label class="form-label">Type</label>
+                <select class="form-select" @bind="editor.Type">
+                    <option value="stdio">stdio</option>
+                    <option value="sse">sse</option>
+                </select>
+            </div>
+            @if (editor.Type == "sse")
+            {
+                <div class="mb-2">
+                    <label class="form-label">URL</label>
+                    <input class="form-control" placeholder="https://..." @bind="editor.Url" />
+                </div>
+            }
+            else
+            {
+                <div class="mb-2">
+                    <label class="form-label">Command</label>
+                    <input class="form-control" placeholder="binary or script" @bind="editor.Command" />
+                </div>
+            }
+
+            <div class="mb-2">
+                <label class="form-label">Args (JSON array)</label>
+                <div class="d-flex gap-2">
+                    <textarea class="form-control" rows="3" @bind="editor.ArgsJson" @bind:event="oninput"></textarea>
+                    <button class="btn btn-outline-secondary" type="button" @onclick="(() => FormatEditorJson(nameof(editor.ArgsJson), mustBeArray: true))">Format</button>
+                </div>
+                @if (!string.IsNullOrEmpty(editorErrors.TryGetValue("ArgsJson", out var aErr) ? aErr : null))
+                {
+                    <div class="text-danger small">@editorErrors["ArgsJson"]</div>
+                }
+            </div>
+            <div class="mb-2">
+                <label class="form-label">Env (JSON object)</label>
+                <div class="d-flex gap-2">
+                    <textarea class="form-control" rows="3" @bind="editor.EnvJson" @bind:event="oninput"></textarea>
+                    <button class="btn btn-outline-secondary" type="button" @onclick="(() => FormatEditorJson(nameof(editor.EnvJson), mustBeObject: true))">Format</button>
+                </div>
+                @if (!string.IsNullOrEmpty(editorErrors.TryGetValue("EnvJson", out var eErr) ? eErr : null))
+                {
+                    <div class="text-danger small">@editorErrors["EnvJson"]</div>
+                }
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Headers (JSON object)</label>
+                <div class="d-flex gap-2">
+                    <textarea class="form-control" rows="3" @bind="editor.HeadersJson" @bind:event="oninput"></textarea>
+                    <button class="btn btn-outline-secondary" type="button" @onclick="(() => FormatEditorJson(nameof(editor.HeadersJson), mustBeObject: true))">Format</button>
+                </div>
+                @if (!string.IsNullOrEmpty(editorErrors.TryGetValue("HeadersJson", out var hErr) ? hErr : null))
+                {
+                    <div class="text-danger small">@editorErrors["HeadersJson"]</div>
+                }
+            </div>
+
+            <div class="d-flex justify-content-between">
+                <div>
+                    <button class="btn btn-primary" @onclick="ApplyEditor">Apply</button>
+                    <button class="btn btn-secondary ms-2" @onclick="CancelEditor">Cancel</button>
+                </div>
+                <button class="btn btn-outline-danger" disabled="@isNewServer" @onclick="DeleteFromEditor">Delete</button>
+            </div>
+        </div>
+    </div>
+    <div class="offcanvas-backdrop fade show" style="opacity:.5" @onclick="CancelEditor"></div>
+}
+
+@code {
+    private List<RoleMcpServerConfig> servers = new();
+    private UserRoles selectedRole = UserRoles.User;
+
+    // Offcanvas editor state
+    private bool isEditorOpen = false;
+    private bool isNewServer = false;
+    private RoleMcpServerConfig? editingTarget = null;
+    private EditorVm editor = new();
+    private Dictionary<string, string> editorErrors = new();
+
+    private record EditorVm
+    {
+        public bool Enabled { get; set; } = true;
+        public string Name { get; set; } = string.Empty;
+        public string Type { get; set; } = "stdio";
+        public string? Command { get; set; }
+        public string? Url { get; set; }
+        public string? ArgsJson { get; set; } = "[]";
+        public string? EnvJson { get; set; } = "{}";
+        public string? HeadersJson { get; set; } = "{}";
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadServers();
+    }
+
+    private async Task LoadServers()
+    {
+        servers = await DbContext.RoleMcpServerConfigs.Where(r => r.Role == selectedRole).OrderBy(r => r.Name).ToListAsync();
+    }
+
+    private async Task OnRoleChanged(ChangeEventArgs e)
+    {
+        if (Enum.TryParse<UserRoles>(e?.Value?.ToString(), out var role))
+        {
+            selectedRole = role;
+            await LoadServers();
+        }
+    }
+
+    private void OpenEditor(RoleMcpServerConfig? s)
+    {
+        editorErrors.Clear();
+        editingTarget = s;
+        isNewServer = s is null;
+        if (s is null)
+        {
+            editor = new EditorVm
+            {
+                Enabled = true,
+                Name = $"server-{servers.Count + 1}",
+                Type = "stdio",
+                ArgsJson = "[]",
+                EnvJson = "{}",
+                HeadersJson = "{}"
+            };
+        }
+        else
+        {
+            editor = new EditorVm
+            {
+                Enabled = s.Enabled,
+                Name = s.Name,
+                Type = s.Type,
+                Command = s.Command,
+                Url = s.Url,
+                ArgsJson = s.ArgsJson,
+                EnvJson = s.EnvJson,
+                HeadersJson = s.HeadersJson
+            };
+        }
+        isEditorOpen = true;
+    }
+
+    private void CancelEditor()
+    {
+        isEditorOpen = false;
+        editorErrors.Clear();
+    }
+
+    private void DeleteFromEditor()
+    {
+        if (editingTarget != null)
+        {
+            RemoveServer(editingTarget);
+        }
+        CancelEditor();
+    }
+
+    private void ApplyEditor()
+    {
+        if (!ValidateEditor()) return;
+        if (editingTarget is null)
+        {
+            var s = new RoleMcpServerConfig
+            {
+                Id = Guid.NewGuid(),
+                Role = selectedRole,
+                Enabled = editor.Enabled,
+                Name = editor.Name,
+                Type = editor.Type,
+                Command = editor.Command,
+                Url = editor.Url,
+                ArgsJson = editor.ArgsJson,
+                EnvJson = editor.EnvJson,
+                HeadersJson = editor.HeadersJson
+            };
+            servers.Add(s);
+        }
+        else
+        {
+            editingTarget.Enabled = editor.Enabled;
+            editingTarget.Name = editor.Name;
+            editingTarget.Type = editor.Type;
+            editingTarget.Command = editor.Command;
+            editingTarget.Url = editor.Url;
+            editingTarget.ArgsJson = editor.ArgsJson;
+            editingTarget.EnvJson = editor.EnvJson;
+            editingTarget.HeadersJson = editor.HeadersJson;
+        }
+        isEditorOpen = false;
+    }
+
+    private bool ValidateEditor()
+    {
+        editorErrors.Clear();
+        if (!string.IsNullOrWhiteSpace(editor.ArgsJson))
+        {
+            if (!TryValidateJson(editor.ArgsJson, mustBeArray: true)) editorErrors[nameof(editor.ArgsJson)] = "Must be a JSON array";
+        }
+        if (!string.IsNullOrWhiteSpace(editor.EnvJson))
+        {
+            if (!TryValidateJson(editor.EnvJson, mustBeObject: true)) editorErrors[nameof(editor.EnvJson)] = "Must be a JSON object";
+        }
+        if (!string.IsNullOrWhiteSpace(editor.HeadersJson))
+        {
+            if (!TryValidateJson(editor.HeadersJson, mustBeObject: true)) editorErrors[nameof(editor.HeadersJson)] = "Must be a JSON object";
+        }
+        StateHasChanged();
+        return editorErrors.Count == 0;
+    }
+
+    private void FormatEditorJson(string field, bool mustBeArray = false, bool mustBeObject = false)
+    {
+        string? val = field switch
+        {
+            nameof(editor.ArgsJson) => editor.ArgsJson,
+            nameof(editor.EnvJson) => editor.EnvJson,
+            nameof(editor.HeadersJson) => editor.HeadersJson,
+            _ => null
+        };
+        if (string.IsNullOrWhiteSpace(val)) return;
+        try
+        {
+            var element = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(val);
+            if (mustBeArray && element.ValueKind != System.Text.Json.JsonValueKind.Array)
+            {
+                editorErrors[field] = "Must be a JSON array";
+                return;
+            }
+            if (mustBeObject && element.ValueKind != System.Text.Json.JsonValueKind.Object)
+            {
+                editorErrors[field] = "Must be a JSON object";
+                return;
+            }
+            var formatted = System.Text.Json.JsonSerializer.Serialize(element, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+            switch (field)
+            {
+                case nameof(editor.ArgsJson): editor.ArgsJson = formatted; break;
+                case nameof(editor.EnvJson): editor.EnvJson = formatted; break;
+                case nameof(editor.HeadersJson): editor.HeadersJson = formatted; break;
+            }
+            if (editorErrors.ContainsKey(field)) editorErrors.Remove(field);
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            editorErrors[field] = $"Invalid JSON: {ex.Message}";
+        }
+    }
+
+    private static bool TryValidateJson(string? json, bool mustBeArray = false, bool mustBeObject = false)
+    {
+        try
+        {
+            var doc = System.Text.Json.JsonDocument.Parse(json);
+            if (mustBeArray && doc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Array) return false;
+            if (mustBeObject && doc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Object) return false;
+            return true;
+        }
+        catch { return false; }
+    }
+
+    private void RemoveServer(RoleMcpServerConfig s)
+    {
+        servers.Remove(s);
+        DbContext.RoleMcpServerConfigs.Remove(s);
+    }
+
+    private async Task SaveChanges()
+    {
+        foreach (var s in servers)
+        {
+            if (s.Id == Guid.Empty || !await DbContext.RoleMcpServerConfigs.AsNoTracking().AnyAsync(x => x.Id == s.Id))
+            {
+                if (s.Id == Guid.Empty) s.Id = Guid.NewGuid();
+                DbContext.RoleMcpServerConfigs.Add(s);
+            }
+            else
+            {
+                DbContext.RoleMcpServerConfigs.Update(s);
+            }
+        }
+        await DbContext.SaveChangesAsync();
+    }
+
+    private void GoBack() => Nav.NavigateTo("/admin");
+}

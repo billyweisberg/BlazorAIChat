@@ -1,25 +1,30 @@
 ﻿@using BlazorAIChat.Models
 @using BlazorAIChat.Services
 @using BlazorAIChat.Components
+@using Microsoft.Extensions.Options
 @inject ChatHistoryService chatHistoryService
 @inject NavigationManager NavigationManager
+@inject IOptions<AppSettings> AppOptions
 
 <div class="h-100 d-flex flex-column" style="min-width: 275px;">
 
     <div class="navbar navbar-dark bg-primary">
         <div class="w-100 d-flex align-items-center justify-content-center ">
-            @if(User!=null && User.Role!= UserRoles.Guest)
+            @if (User != null)
             {
-                <a href="/userprofile" class="navbar-brand mb-0 h1 text-decoration-none text-light" style="cursor: pointer;">@User?.Name</a>
-            }
-            else
-            {
-                <span class="navbar-brand mb-0 h1">@User?.Name</span>
+                <div class="d-flex align-items-center">
+                    <span class="navbar-brand mb-0 h1 text-light">@User?.Name</span>
+                    <button class="btn btn-sm btn-outline-light ms-2" @onclick="@(() => NavigationManager.NavigateTo("/userProfile"))">
+                        <i class="bi bi-person-fill me-1"></i>Profile
+                    </button>
+                </div>
             }
 
-            @if (User!=null && User.Role == UserRoles.Admin)
+            @if (User != null && (User.Role == UserRoles.Admin || !AppOptions.Value.RequireEasyAuth))
             {
-                <button class="btn btn-sm btn-link text-light" @onclick="@(()=>NavigationManager.NavigateTo("/admin"))">Admin</button>
+                <button class="btn btn-sm btn-outline-light ms-2" @onclick="@(()=>NavigationManager.NavigateTo("/admin"))">
+                    <i class="bi bi-gear-fill me-1"></i>Admin
+                </button>
             }
         </div>
     </div>
@@ -317,8 +322,8 @@
 
     // Invokes the delete uploaded documents event.
     // This is captured by the chat component to delete all uploaded documents.
-    private void DeleteUploadedDocs(string sessionId)
+    private void DeleteUploadedDocs(String sessionId)
     {
-        OnDeleteUploadedDocs.InvokeAsync(sessionId);
+    OnDeleteUploadedDocs.InvokeAsync(sessionId);
     }
 }

@@ -76,6 +76,11 @@
     {
         public List<McpInput> Inputs { get; set; } = new();
         public Dictionary<string, McpServer> Servers { get; set; } = new();
+        // Phase 1 knobs
+        public int CacheSlidingExpirationMinutes { get; set; } = 15;
+        public int CacheAbsoluteExpirationMinutes { get; set; } = 60;
+        public int ConnectRetryCount { get; set; } = 2;
+        public int ConnectRetryBackoffMs { get; set; } = 500;
     }
 
     public class McpInput
