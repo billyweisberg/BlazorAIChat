@@ -32,7 +32,7 @@
                 </div>
             </div>
             <div class="card-body">
-                @if (currentUser.Role == UserRoles.Guest)
+                @if (!AppOptions.Value.RequireEasyAuth)
                 {
                     <div class="alert alert-warning" role="alert">
                         You are using the shared guest account. All MCP server configurations and input values you set here are shared across everyone using this site while EasyAuth is disabled.
@@ -577,7 +577,7 @@
     private List<BlazorAIChat.Services.McpServerStatus> effectiveStatuses = new();
 
     private bool disableIdentityFields => !AppOptions.Value.RequireEasyAuth;
-    private bool isGuestUser => currentUser is not null && (string.Equals(currentUser.Id, "guest", StringComparison.OrdinalIgnoreCase) || currentUser.Role == UserRoles.Guest);
+    private bool isGuestUser => currentUser is not null && string.Equals(currentUser.Id, "guest", StringComparison.OrdinalIgnoreCase);
 
     private BlazorAIChat.Services.McpServerStatus? GetStatus(string name)
     {
@@ -1059,7 +1059,8 @@
     private void EnforceGuestIdentity()
     {
         if (currentUser is null) return;
-        if (isGuestUser || !AppOptions.Value.RequireEasyAuth)
+        // Only enforce guest identity in guest mode (EasyAuth disabled)
+        if (!AppOptions.Value.RequireEasyAuth)
         {
             currentUser.Name = "guest";
             currentUser.Email = string.Empty;

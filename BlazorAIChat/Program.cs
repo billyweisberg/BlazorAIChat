@@ -18,6 +18,7 @@ using Azure.Extensions.AspNetCore.DataProtection.Blobs;
 using Azure.Extensions.AspNetCore.DataProtection.Keys;
 using Azure.Identity;
 using Azure.Security.KeyVault.Secrets;
+using Microsoft.AspNetCore.Authentication; // added for SignOutAsync
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -33,6 +34,9 @@ else
 {
     builder.Configuration.AddJsonFile("appsettings.json", optional: false, reloadOnChange: true);
 }
+
+// Allow Azure App Settings (environment variables) to override JSON
+builder.Configuration.AddEnvironmentVariables();
 
 // Configure logging to default to the console
 builder.Logging.ClearProviders();
@@ -199,6 +203,13 @@ app.UseAuthorization();
 
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
+
+// Add a simple cookie sign-out endpoint for non-EasyAuth scenarios
+app.MapGet("/logout", async (HttpContext httpContext) =>
+{
+    await httpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+    httpContext.Response.Redirect("/");
+});
 
 //Before we start the app, ensure that the KNN folder exists on the filesystem
 if (!Directory.Exists("KNN"))
