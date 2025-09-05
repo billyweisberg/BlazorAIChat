@@ -223,13 +223,12 @@ else
     private string userMessage = string.Empty;
     private List<Message>? messagesInChat;
     private Session? currentSession;
-    private string sessionIdToDelete = string.Empty;
 
     //Flags for UI
     bool showNeedsConfigure = false;
     bool isFileInputDisabled=false;
     bool isResponding = false;
-    bool stopResponding = false;
+    bool stopResponding = false; // user requested stop (for graceful partial message finalization)
     private bool loadingComplete = false;
 
     //User properties
@@ -256,134 +255,15 @@ else
 
     bool isPageFullyLoaded = false;
 
-    /// <summary>
-    /// Validates if a file extension is supported based on the current settings.
-    /// </summary>
-    /// <param name="fileName">The file name to validate.</param>
-    /// <returns>True if the file extension is supported, false otherwise.</returns>
-    private bool IsFileExtensionSupported(string fileName)
-    {
-        var extension = Path.GetExtension(fileName).ToLower();
-        
-        // Check document extensions (always supported)
-        if (SupportedDocumentExtensions.Contains(extension))
-        {
-            return true;
-        }
-        
-        // Check image extensions (only if images are supported)
-        if (settings.AzureOpenAIChatCompletion.SupportsImages && SupportedImageExtensions.Contains(extension))
-        {
-            return true;
-        }
-        
-        return false;
-    }
-
-    /// <summary>
-    /// Checks if a file is an image based on its extension.
-    /// </summary>
-    /// <param name="fileName">The file name to check.</param>
-    /// <returns>True if the file is an image, false otherwise.</returns>
-    private bool IsImageFile(string fileName)
-    {
-        var extension = Path.GetExtension(fileName).ToLower();
-        return SupportedImageExtensions.Contains(extension);
-    }
-
-    /// <summary>
-    /// Initializes the page and loads necessary data.
-    /// </summary>
-    protected override async Task OnInitializedAsync()
-    {
-
-        //Get instance of NavMenu
-        NavMenu = new NavMenu();
-
-        await FetchCurrentUserAsync();
-        FetchAppSettings();
-        await InitializeChatAsync();
-
-        await InvokeAsync(StateHasChanged);
-    }
-
-    protected override async Task OnAfterRenderAsync(bool firstRender)
-    {
-        isPageFullyLoaded = true;
-        await js.InvokeVoidAsync("scrollToBottom", "MessagesInChatdiv");
-    }
-
-    private async Task FetchCurrentUserAsync()
-    {
-        try
-        {
-            currentUser = await userService.GetCurrentUserAsync();
-        }
-        catch (HttpRequestException ex)
-        {
-            Console.WriteLine($"Network error while fetching current user: {ex.Message}");
-            ShowAlert("Network error while fetching current user. Please check your connection.", AlertTypeEnum.danger);
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Initialization error: {ex.Message}");
-            ShowAlert("An unexpected error occurred during initialization.", AlertTypeEnum.danger);
-        }
-    }
-
-    private void FetchAppSettings()
-    {
-        try
-        {
-            settings = appSettings.Value;
-
-            if (currentUser.Id == "Guest User" && settings.RequireEasyAuth)
-            {
-                showNeedsConfigure = true;
-                StateHasChanged();
-                return;
-            }
-
-            var dbConfig = dbContext.Config.FirstOrDefault();
-            if (dbConfig != null)
-                config = dbConfig;
-        }
-        catch (DbUpdateException ex)
-        {
-            Console.WriteLine($"Database error during initialization: {ex.Message}");
-            ShowAlert("Database error during initialization. Please try again later.", AlertTypeEnum.danger);
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Initialization error: {ex.Message}");
-            ShowAlert("An unexpected error occurred during initialization.", AlertTypeEnum.danger);
-        }
-    }
-
-    private async Task InitializeChatAsync()
-    {
-        try
-        {
-            messagesInChat = new List<Message>();
-            await ReloadChatMessagesAsync();
-            StateHasChanged();
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Initialization error: {ex.Message}");
-            ShowAlert("An unexpected error occurred during initialization.", AlertTypeEnum.danger);
-        }
-    }
-
-    /// <summary>
-    /// Flags that the user has requested the AI to stop responding.
-    /// </summary>
     private void Stop()
     {
-        if (isResponding)
+        if (!isResponding) return;
+        stopResponding = true;
+        try
         {
-            stopResponding = true;
+            aiService.CancelCurrentResponse();
         }
+        catch { }
     }
 
     private async Task OnUserMessageChanged(string message)
@@ -392,96 +272,75 @@ else
         await SendMessage();
     }
 
-
-    /// <summary>
-    /// Handles the user's message and sends it to the AI for processing.
-    /// </summary>
     private async Task SendMessage()
     {
         try
         {
             if (!string.IsNullOrWhiteSpace(userMessage) && currentSession is not null)
             {
-
-                //Set the flag to indicate that it can respond.
                 stopResponding = false;
-
-                //Create a new message object and add it to the mesaagesInChat list. This will allow the UI to display the message while the AI processes it.
-                Message message = new Message(currentSession.Id, userMessage);
+                var message = new Message(currentSession.Id, userMessage);
                 messagesInChat?.Add(message);
-
-                //We do this to ensure that the user message is displayed in the chat window since calling the AI may take a moment. We
-                //want the UI to feel responsive.
-                string messageToProcess = userMessage;
+                var messageToProcess = userMessage;
                 userMessage = string.Empty;
                 isResponding = true;
                 StateHasChanged();
 
-                //Need this delay to give the browser enough time to render the MessagesInChatdiv.
-                //If this doesn't exist then it is not able to scoll to the bottom.
                 await Task.Delay(100);
                 await js.InvokeVoidAsync("scrollToBottom", "MessagesInChatdiv");
 
+                var markdownBuilder = new StringBuilder();
                 try
                 {
-                    var markdownBuilder = new StringBuilder();
-
                     await foreach (var chatUpdate in await aiService.GetChatResponseAsync(messageToProcess, message, currentSession, currentUser))
                     {
-                        //If the user has requested to stop responding, then break out of the loop
                         if (stopResponding)
                         {
-                            break;
+                            break; // user stop (will treat as partial)
                         }
-
                         foreach (var chunk in chatUpdate)
                         {
-                            //If the chat update has content, then append it to the results
                             if (chunk?.Content != null)
                             {
                                 markdownBuilder.Append(chunk.Content);
                             }
                         }
-
                         message.Completion = markdownBuilder.ToString();
-
-                        // Scroll to the bottom of the chat window
                         await js.InvokeVoidAsync("scrollToBottom", "MessagesInChatdiv");
                         StateHasChanged();
-
                     }
+                }
+                catch (OperationCanceledException)
+                {
+                    // Expected when user presses Stop; treat as partial result
+                }
+                catch (HttpRequestException ex)
+                {
+                    Console.WriteLine($"Network error while processing chat: {ex.Message}");
+                    ShowAlert($"Network error while processing chat. Please check your connection. {ex.Message}", AlertTypeEnum.danger);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"StreamChatCompletionAsync error: {ex.Message}");
+                    ShowAlert($"An unexpected error occurred while processing the chat.  {ex.Message}", AlertTypeEnum.danger);
+                }
+                finally
+                {
                     message.Completion = markdownBuilder.ToString();
                     message.CompletionTimeStamp = DateTime.UtcNow;
                     aiService.history.AddAssistantMessage(markdownBuilder.ToString());
-
-                    //store the chat session history
                     await UpdateSessionAndMessage(currentSession?.Id ?? string.Empty, message);
 
-                    //Update the chat session name if it is the default new chat name
                     if (currentSession is not null && currentSession.Name == Models.Constants.NEW_CHAT)
                     {
                         currentSession.Name = await aiService.SummarizeChatSessionNameAsync(currentSession?.SessionId);
                         NavMenu?.UpdateNavMenuDisplay("summarized text", currentSession);
                     }
 
-                    // Scroll to the bottom of the chat window
                     await js.InvokeVoidAsync("scrollToBottom", "MessagesInChatdiv");
                     isResponding = false;
+                    stopResponding = false;
                     StateHasChanged();
-                }
-                catch (HttpRequestException ex)
-                {
-                    isResponding = false;
-                    StateHasChanged();
-                    Console.WriteLine($"Network error while processing chat: {ex.Message}");
-                    ShowAlert($"Network error while processing chat. Please check your connection. {ex.Message}", AlertTypeEnum.danger);
-                }
-                catch (Exception ex)
-                {
-                    isResponding = false;
-                    StateHasChanged();
-                    Console.WriteLine($"StreamChatCompletionAsync error: {ex.Message}");
-                    ShowAlert($"An unexpected error occurred while processing the chat.  {ex.Message}", AlertTypeEnum.danger);
                 }
             }
         }
@@ -489,6 +348,8 @@ else
         {
             Console.WriteLine($"SendMessage error: {ex.Message}");
             ShowAlert($"An error occurred while sending the message. {ex.Message}", AlertTypeEnum.danger);
+            isResponding = false;
+            stopResponding = false;
         }
 
         await InvokeAsync(StateHasChanged);
@@ -864,4 +725,19 @@ else
         if (currentUser.Role!=UserRoles.Guest)
             NavigationManager.NavigateTo("/userprofile");
     }
+
+    private bool IsFileExtensionSupported(string fileName)
+    {
+        var extension = Path.GetExtension(fileName).ToLower();
+        if (SupportedDocumentExtensions.Contains(extension)) return true;
+        if (settings.AzureOpenAIChatCompletion.SupportsImages && SupportedImageExtensions.Contains(extension)) return true;
+        return false;
+    }
+
+    private bool IsImageFile(string fileName)
+    {
+        var extension = Path.GetExtension(fileName).ToLower();
+        return SupportedImageExtensions.Contains(extension);
+    }
+
 }

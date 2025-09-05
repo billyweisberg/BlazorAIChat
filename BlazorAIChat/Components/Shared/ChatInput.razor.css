@@ -17,3 +17,32 @@
         border-color: #004085;
         color: white;
     }
+
+.btn-chat-file {
+    background-color: #0d47a1; /* dark blue */
+    color: #fff;
+    border: 1px solid #0d47a1;
+}
+.btn-chat-file:hover:not(:disabled) { background-color: #0b3c8a; color:#fff; }
+.btn-chat-file:disabled { background-color:#0d47a1; color:#fff; opacity:.65; }
+
+.btn-chat-send {
+    background-color: #1b5e20; /* dark green */
+    color: #fff;
+    border: 1px solid #1b5e20;
+}
+.btn-chat-send:hover:not(:disabled) { background-color: #164e1a; color:#fff; }
+.btn-chat-send:disabled { background-color:#1b5e20; color:#fff; opacity:.55; }
+
+.btn-chat-stop {
+    background-color: #b71c1c; /* red */
+    color: #fff;
+    border: 1px solid #b71c1c;
+}
+.btn-chat-stop:hover:not(:disabled) { background-color: #9c1717; color:#fff; }
+.btn-chat-stop:disabled { background-color:#b71c1c; color:#fff; opacity:.55; }
+
+/* Remove grayscale filter so colors stay vivid */
+.btn-chat-file:disabled, .btn-chat-send:disabled, .btn-chat-stop:disabled {
+    filter:none;
+}

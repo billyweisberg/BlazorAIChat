@@ -1,50 +1,105 @@
 @using Microsoft.AspNetCore.Components.Forms
 @using Microsoft.AspNetCore.Components.Web
+@inject IJSRuntime JS
 
-<div class="input-group">
-    <input type="text" class="form-control" placeholder="Enter your message" disabled="@IsResponding" @bind-value="UserMessage" @bind-value:event="oninput" @onkeydown="HandleKeyDown" />
-    <button class="btn btn-primary" @onclick="SendMessage">Send</button>
-    <label class="btn file-selector" for="fileInput">Upload File</label>
+<div class="chat-input d-flex flex-column gap-2">
+    <div class="d-flex align-items-end gap-2 w-100">
+        <textarea @ref="textAreaRef"
+                  class="form-control flex-grow-1"
+                  placeholder="Type a message (Shift+Enter = new line)"
+                  rows="1"
+                  data-max-rows="5"
+                  disabled="@IsResponding"
+                  @bind=UserMessage
+                  @bind:event="oninput"
+                  @onkeydown="HandleKeyDown"
+                  style="resize:none; overflow:hidden; line-height:1.4; padding:.55rem .75rem; font-size:.9rem; min-height:2.2rem;"></textarea>
+        <div class="btn-group align-self-start">
+            <label class="btn btn-chat-file" for="fileInput" title="Upload file" disabled="@(IsResponding)">File</label>
+            <button type="button" class="btn btn-chat-send" @onclick="SendMessage" disabled="@IsResponding" title="Send (Enter)">Send</button>
+            <button type="button" class="btn btn-chat-stop" @onclick="OnStop" disabled="@(!IsResponding)" title="Stop streaming">Stop</button>
+        </div>
+    </div>
     <InputFile id="fileInput" @ref="InputFileRef" class="d-none" OnChange="OnFileSelected" disabled="@(IsFileInputDisabled || IsResponding)" />
-    <button class="btn btn-secondary" @onclick="OnStop">Stop</button>
 </div>
 
 @code {
+    [Parameter] public string UserMessage { get; set; } = string.Empty;
+    [Parameter] public bool IsResponding { get; set; }
+    [Parameter] public EventCallback OnStop { get; set; }
+    [Parameter] public EventCallback<InputFileChangeEventArgs> OnFileSelected { get; set; }
+    [Parameter] public EventCallback<string> UserMessageChanged { get; set; }
+    [Parameter] public bool IsFileInputDisabled { get; set; }
+    [Parameter] public InputFile? InputFileRef { get; set; }
 
-    [Parameter]
-    public string UserMessage { get; set; } = string.Empty;
+    private ElementReference textAreaRef;
+    private bool _pendingFocus = true; // initial + after send
+    private bool _lastResponding;
+    private int _prevLength;
 
-    [Parameter]
-    public bool IsResponding { get; set; }
+    protected override void OnParametersSet()
+    {
+        if (_lastResponding && !IsResponding)
+        {
+            _pendingFocus = true; // finished streaming
+        }
+        _lastResponding = IsResponding;
+    }
 
-    [Parameter]
-    public EventCallback OnStop { get; set; }
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await AttachAutoGrowAsync();
+        }
 
-    [Parameter]
-    public EventCallback<InputFileChangeEventArgs> OnFileSelected { get; set; }
+        if (_pendingFocus)
+        {
+            _pendingFocus = false;
+            await FocusAsync();
+        }
 
-    [Parameter]
-    public EventCallback<string> UserMessageChanged { get; set; }
+        if (_prevLength != UserMessage.Length)
+        {
+            _prevLength = UserMessage.Length;
+            await TriggerAutoGrowAsync();
+        }
+    }
 
-    [Parameter]
-    public bool IsFileInputDisabled { get; set; }
+    private async Task AttachAutoGrowAsync()
+    {
+        try { await JS.InvokeVoidAsync("attachAutoGrow", textAreaRef); } catch { }
+    }
 
-    [Parameter]
-    public InputFile? InputFileRef { get; set; }
+    private async Task TriggerAutoGrowAsync()
+    {
+        try { await JS.InvokeVoidAsync("triggerAutoGrow", textAreaRef); } catch { }
+    }
+
+    private async Task FocusAsync()
+    {
+        try { await JS.InvokeVoidAsync("focusElement", textAreaRef); } catch { }
+    }
 
     private async Task HandleKeyDown(KeyboardEventArgs e)
     {
-        if (e.Key == "Enter")
+        if (e.Key == "Enter" && !e.ShiftKey && !IsResponding)
         {
             await SendMessage();
+            _pendingFocus = true;
         }
     }
 
     private async Task SendMessage()
     {
-        if (!string.IsNullOrWhiteSpace(UserMessage))
-        {
-            await UserMessageChanged.InvokeAsync(UserMessage);
-        }
+        // Ignore if empty or currently responding
+        if (IsResponding || string.IsNullOrWhiteSpace(UserMessage)) return;
+
+        var msg = UserMessage.TrimEnd();
+        await UserMessageChanged.InvokeAsync(msg);
+        UserMessage = string.Empty;
+        _prevLength = 0;
+        await TriggerAutoGrowAsync();
+        StateHasChanged();
     }
 }

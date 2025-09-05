@@ -10,7 +10,7 @@
                 <strong class="me-auto text-capitalize">User</strong>
                 <span class="chat-timestamp">@msg.TimeStamp.ToLocalTime().ToString("MM/dd/yyyy HH:mm:ss")</span>
             </div>
-            <div class="toast-body">
+            <div class="toast-body user-message-text">
                 @if (msg.Prompt.StartsWith("data:image"))
                 {
                     <img style='max-height:300px; max-width:300px;' src='@msg.Prompt' />
@@ -21,7 +21,9 @@
                     <img style="width:25px" src="@FileUtils.GetIconForFileType(fileName)" /> @fileName
                 }
                 else
-                    @(new MarkupString(msg.Prompt))
+                {
+                    @msg.Prompt
+                }
             </div>
         </div>
         <div class="toast fade show w-75 rounded-3 align-self-end">

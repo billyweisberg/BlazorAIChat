@@ -39,6 +39,15 @@ namespace BlazorAIChat.Services
         private readonly AISearchService? azureAISearchService;
         private readonly IMcpConnectionManager mcpConnectionManager;
 
+        // Cancellation token source for the active streaming response
+        private CancellationTokenSource? _currentResponseCts;
+        private readonly object _ctsLock = new();
+
+        /// <summary>
+        /// True if a streaming response is currently active (not yet completed or cancelled).
+        /// </summary>
+        public bool IsStreaming => _currentResponseCts is not null && !_currentResponseCts.IsCancellationRequested;
+
         /// <summary>
         /// Initializes a new instance of the <see cref="AIService"/> class.
         /// </summary>
@@ -70,6 +79,28 @@ namespace BlazorAIChat.Services
 
             // Initialize Kernel Memory
             kernelMemory = InitializeKernelMemory();
+        }
+
+        /// <summary>
+        /// Cancel the currently running streaming response (if any).
+        /// </summary>
+        public void CancelCurrentResponse()
+        {
+            try
+            {
+                lock (_ctsLock)
+                {
+                    if (_currentResponseCts != null && !_currentResponseCts.IsCancellationRequested)
+                    {
+                        _currentResponseCts.Cancel();
+                        logger.LogInformation("Active streaming response cancelled by user.");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Error cancelling streaming response");
+            }
         }
 
         /// <summary>
@@ -233,45 +264,84 @@ namespace BlazorAIChat.Services
             return kernelMemoryBuilder.Build<MemoryServerless>();
         }
 
-        private void RefreshRagDecisionAgent()
+        private void RefreshRagDecisionAgent() => ragDecisionAgent = new ChatCompletionAgent
         {
-            // Recreate the agent so we can inject the latest tool list into Instructions (init-only)
-            ragDecisionAgent = new ChatCompletionAgent
-            {
-                Name = "RAGDecisionAgent",
-                Kernel = kernel,
-                Instructions = $"""
-                    Determine whether the question can be answered by the available tools or requires retrieval from stored knowledge.
-                    
-                    AVAILABLE KERNEL FUNCTIONS:
-                    {GetAvailableFunctionsList(kernel)}
-                    
-                    RULES FOR DECISION:
-                    1. If the question contains URLs, ALWAYS return 'true'
-                    2. If the question refers to specific documents or uploaded content, return 'true'
-                    3. If the question requires factual information, specific data, or domain knowledge like legal requirements, demographics, statistics, regulations, historical facts, or specific information about locations, return 'true'
-                    4. If the question can be answered using only simple utility functions like getting the current time, date, or basic calculations, return 'false'
-                    5. For ambiguous cases where both tools and retrieval might help, prefer 'true'
-                    6. If you are unsure, return 'true'
-                          
-                    EXAMPLES:
-                    - "What time is it?" → 'false' (can be answered by tools)
-                    - "What is the weather in Detroit?" → 'false' (can be answered by tools)
-                    - "Summarize the PDF I uploaded" → 'true' (needs retrieval)
-                    - "What does this webpage say about climate change: https://example.com" → 'true' (contains URL)
-                    - "How old do you have to be to get a driver's license in Ohio?" → 'true' (requires factual/legal information)
-                    - "What are the requirements to vote in California?" → 'true' (requires factual/legal information)
+            Name = "RAGDecisionAgent",
+            Kernel = kernel,
+            Instructions = $"""
+                Determine whether the question can be answered by the available tools or requires retrieval from stored knowledge.
+                
+                AVAILABLE KERNEL FUNCTIONS:
+                {GetAvailableFunctionsList(kernel)}
+                
+                RULES FOR DECISION:
+                1. If the question contains URLs, ALWAYS return 'true'
+                2. If the question refers to specific documents or uploaded content, return 'true'
+                3. If the question requires factual information, specific data, or domain knowledge like legal requirements, demographics, statistics, regulations, historical facts, or specific information about locations, return 'true'
+                4. If the question can be answered using only simple utility functions like getting the current time, date, or basic calculations, return 'false'
+                5. For ambiguous cases where both tools and retrieval might help, prefer 'true'
+                6. If you are unsure, return 'true'
+                
+                EXAMPLES:
+                - "What time is it?" → 'false' (can be answered by tools)
+                - "What is the weather in Detroit?" → 'false' (can be answered by tools)
+                - "Summarize the PDF I uploaded" → 'true' (needs retrieval)
+                - "What does this webpage say about climate change: https://example.com" → 'true' (contains URL)
+                - "How old do you have to be to get a driver's license in Ohio?" → 'true' (requires factual/legal information)
+                - "What are the requirements to vote in California?" → 'true' (requires factual/legal information)
+                
+                Respond with ONLY the single word 'true' or 'false'.
+            """,
+            Arguments = new KernelArguments(new OpenAIPromptExecutionSettings { Temperature = 0, MaxTokens = 10 })
+        };
 
-                    
-                    Analyze the question and respond with ONLY 'true' or 'false'.
-                """,
-                Arguments = new KernelArguments(
-                    new OpenAIPromptExecutionSettings()
-                    {
-                        Temperature = 0,
-                        MaxTokens = 10,
-                    })
-            };
+        private async Task<bool> ShouldUseRAGForPrompt(string prompt, string sessionId)
+        {
+            if (settings.AIDeterminesRagUsage == false) return true;
+            if (StringUtils.GetURLsFromString(prompt).Count > 0) return true;
+            bool sessionHasDocuments = dbContext.SessionDocuments.Any(d => d.SessionId == sessionId);
+            if (!sessionHasDocuments && !settings.UsesAzureAISearchSharedKnowledge) return false;
+
+            // If there are documents we strongly bias toward retrieval; still ask the agent for future extensibility
+            ChatHistory analysisHistory = new();
+            analysisHistory.AddUserMessage(prompt);
+            StringBuilder output = new();
+            Microsoft.SemanticKernel.Agents.AgentThread? agentThread = null;
+            try
+            {
+                await foreach (var response in ragDecisionAgent.InvokeAsync(analysisHistory, agentThread).ConfigureAwait(false))
+                {
+                    output.Append(response.Message.ToString());
+                    agentThread = response.Thread;
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "RAG decision agent failed, defaulting to retrieval");
+                return true; // fail open toward using documents
+            }
+            finally
+            {
+                if (agentThread is not null)
+                {
+                    try { await agentThread.DeleteAsync(); } catch { }
+                }
+            }
+
+            var completionText = output.ToString().Trim().ToLowerInvariant();
+            bool containsTrue = completionText == "true" || completionText.Contains("true");
+            bool containsFalse = completionText == "false" || completionText.Contains("false");
+
+            if (!containsTrue && !containsFalse)
+            {
+                // Unrecognized output – log and default to retrieval if we have any documents
+                logger.LogInformation("RAG decision agent returned unrecognized output '{Output}', defaulting to {Default}", completionText, sessionHasDocuments ? "true" : "false");
+                return sessionHasDocuments; // leverage docs only if available
+            }
+
+            // Prefer true in ambiguous case where both words somehow appear
+            if (containsTrue && containsFalse) return true;
+            return containsTrue;
         }
 
         /// <summary>
@@ -326,102 +396,54 @@ namespace BlazorAIChat.Services
             await mcpConnectionManager.EnsurePluginsForUserAsync(currentUser.Id, kernel).ConfigureAwait(false);
             RefreshRagDecisionAgent();
 
+            // Dispose previous CTS if still around
+            lock (_ctsLock)
+            {
+                _currentResponseCts?.Cancel();
+                _currentResponseCts?.Dispose();
+                _currentResponseCts = new CancellationTokenSource();
+            }
+            var ct = _currentResponseCts.Token;
+
             // Conditionally perform RAG only if needed
-            bool ragNeeded = await ShouldUseRAGForPrompt(prompt, currentSession.SessionId);
+            bool ragNeeded = await ShouldUseRAGForPrompt(prompt, currentSession.SessionId).ConfigureAwait(false);
             if (ragNeeded)
             {
-                logger.LogInformation("RAG determined to be needed, performing document retrieval");
+                logger.LogInformation("RAG needed; performing retrieval");
                 await DoRAG(prompt, message, currentSession, currentUser).ConfigureAwait(false);
             }
             else
             {
-                logger.LogInformation("RAG determined not needed, proceeding with direct completion");
+                logger.LogInformation("RAG not needed; using prompt directly");
                 // Just add the prompt to history without RAG
                 history.AddUserMessage(prompt);
             }
 
             // Clean up the chat history to fit within the token limit
-            history = await AIUtils.CleanUpHistoryAsync(history, chatCompletionService, 10, 5);
+            history = await AIUtils.CleanUpHistoryAsync(history, chatCompletionService, 10, 5).ConfigureAwait(false);
 
-            IAsyncEnumerable<StreamingChatMessageContent> streamingMessages;
-
-            // Get the chat response as a stream of messages
             AzureOpenAIPromptExecutionSettings executionSettings = new()
             {
                 Temperature = 0,
                 FunctionChoiceBehavior = FunctionChoiceBehavior.Auto(options: new() { RetainArgumentTypes = true })
             };
 
-            
-            streamingMessages = chatCompletionService.GetStreamingChatMessageContentsAsync(history, executionSettings, kernel);
-            
-            // Buffer and yield messages in chunks
-            logger.LogInformation("Chat response generation completed for session: {SessionId}", currentSession.SessionId);
-            return BufferMessagesInChunks(streamingMessages, settings.AzureOpenAIChatCompletion.ResponseChunkSize);
+            var streamingMessages = chatCompletionService.GetStreamingChatMessageContentsAsync(history, executionSettings, kernel, ct);
+            return BufferMessagesInChunks(streamingMessages, settings.AzureOpenAIChatCompletion.ResponseChunkSize, ct);
         }
 
-        /// <summary>
-        /// Determines whether RAG should be used for the given prompt
-        /// </summary>
-        /// <param name="prompt">The user's prompt</param>
-        /// <param name="sessionId">The current session ID</param>
-        /// <returns>True if RAG should be used, false otherwise</returns>
-        private async Task<bool> ShouldUseRAGForPrompt(string prompt, string sessionId)
+        private async IAsyncEnumerable<List<StreamingChatMessageContent>> BufferMessagesInChunks(IAsyncEnumerable<StreamingChatMessageContent> streamingMessages, int chunkSize, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
         {
-            // If the configuration indicates that we should not use AI to determine RAG usage
-            // we always return true to use RAG.
-            if (settings.AIDeterminesRagUsage == false)
-                return true;
-
-            // Always use RAG if URLs are present in the prompt
-            if (StringUtils.GetURLsFromString(prompt).Count > 0)
-            {
-                return true;
-            }
-
-            // Check if there are any documents in this session or if we are using shared knowledge store
-            bool sessionHasDocuments = dbContext.SessionDocuments.Any(d => d.SessionId == sessionId);
-            if (!sessionHasDocuments && !settings.UsesAzureAISearchSharedKnowledge)
-            {
-                // If no documents in session, don't bother with RAG unless there is a central knowledge store configured.
-                return false;
-            }
-
-            // Use ChatCompletionAgent to analyze if retrieval is needed
-            ChatHistory analysisHistory = new();
-       
-            analysisHistory.AddUserMessage(prompt);
-            StringBuilder output = new();
-            Microsoft.SemanticKernel.Agents.AgentThread? agentThread = null;
-            await foreach (var response in ragDecisionAgent.InvokeAsync(analysisHistory, agentThread).ConfigureAwait(false))
-            {
-                output.Append(response.Message.ToString());
-                agentThread = response.Thread;
-            }
-            var completionText = output.ToString().Trim().ToLower();
-            if (agentThread is not null)
-            {
-                await agentThread.DeleteAsync();
-            }
-            return completionText.Contains("true");
-        }
-
-        private async IAsyncEnumerable<List<StreamingChatMessageContent>> BufferMessagesInChunks(IAsyncEnumerable<StreamingChatMessageContent> streamingMessages, int chunkSize)
-        {
-            List<StreamingChatMessageContent> buffer = new List<StreamingChatMessageContent>(chunkSize);
-
-            await foreach (var message in streamingMessages)
+            List<StreamingChatMessageContent> buffer = new(chunkSize);
+            await foreach (var message in streamingMessages.WithCancellation(ct).ConfigureAwait(false))
             {
                 buffer.Add(message);
-
                 if (buffer.Count >= chunkSize)
                 {
                     yield return new List<StreamingChatMessageContent>(buffer);
                     buffer.Clear();
                 }
             }
-
-            // Yield any remaining messages
             if (buffer.Count > 0)
             {
                 yield return new List<StreamingChatMessageContent>(buffer);
@@ -443,7 +465,6 @@ namespace BlazorAIChat.Services
                     sb.AppendLine($"Assistant: {msg.Completion}");
             }
             sb.AppendLine($"User: {prompt}");
-            // Use an agent to condense this into a search query
             ChatHistory agentHistory = new() { new ChatMessageContent(AuthorRole.User, sb.ToString()) };
             StringBuilder output = new();
             Microsoft.SemanticKernel.Agents.AgentThread? agentThread = null;
@@ -498,15 +519,18 @@ namespace BlazorAIChat.Services
             SearchResult? searchData = null;
             List<(double? score, string? title, string? chunk)>? sharedResults = null;
             string contextualQuery = await GenerateContextualQuery(prompt, currentSession.SessionId);
+            string index = currentSession.SessionId; // ensure consistent index usage
             if (urls.Count > 0)
             {
                 await ProcessURLsWithKernelMemory(urls, currentSession, currentUser).ConfigureAwait(false);
-                string messageToProcessNoURLS = await GenerateNewPromptForMessagesWithUrl(prompt).ConfigureAwait(false);
-                searchData = await kernelMemory!.SearchAsync(contextualQuery, currentSession.Id, minRelevance: 0.5, limit: 5).ConfigureAwait(false);
+                string _ = await GenerateNewPromptForMessagesWithUrl(prompt).ConfigureAwait(false);
+                logger.LogDebug("Searching memory index '{Index}' for contextual query after URL processing", index);
+                searchData = await kernelMemory!.SearchAsync(contextualQuery, index, minRelevance: 0.5, limit: 5).ConfigureAwait(false);
             }
             else
             {
-                searchData = await kernelMemory!.SearchAsync(contextualQuery, currentSession.Id, minRelevance: 0.5, limit: 5).ConfigureAwait(false);
+                logger.LogDebug("Searching memory index '{Index}' for contextual query (no URLs)", index);
+                searchData = await kernelMemory!.SearchAsync(contextualQuery, index, minRelevance: 0.5, limit: 5).ConfigureAwait(false);
             }
             if (azureAISearchService != null && azureAISearchService.IsReady)
             {
@@ -519,6 +543,10 @@ namespace BlazorAIChat.Services
                     "I've found relevant information from your documents that may help answer your question:\n\n" +
                     string.Join("\n\n---\n\n", relevantContent)
                 );
+            }
+            else
+            {
+                logger.LogInformation("No relevant RAG content retrieved for session {SessionId} (index {Index}).", currentSession.SessionId, index);
             }
             // Add the original prompt to the chat history
             history.AddUserMessage(prompt);

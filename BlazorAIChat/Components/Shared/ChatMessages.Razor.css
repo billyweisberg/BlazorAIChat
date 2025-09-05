@@ -75,11 +75,16 @@
     font-weight: 400;
     padding-left: 12px;
     align-self: center;
-    /* visually right-align in flex header */
 }
 
 .toast-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
+}
+
+/* Preserve user-entered newlines and multiple spaces */
+.user-message-text {
+    white-space: pre-wrap; /* respect \n, wrap long lines */
+    word-break: break-word;
 }
