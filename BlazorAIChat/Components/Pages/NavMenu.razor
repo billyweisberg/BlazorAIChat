@@ -26,13 +26,6 @@
                     <i class="bi bi-gear-fill me-1"></i>Admin
                 </button>
             }
-
-            @if (User != null && AppOptions.Value.RequireEasyAuth)
-            {
-                <button class="btn btn-sm btn-outline-light ms-2" @onclick="Logout">
-                    <i class="bi bi-box-arrow-right me-1"></i>Logout
-                </button>
-            }
         </div>
     </div>
 
@@ -310,21 +303,6 @@
         }
 
         _renamePopUpOpen = false;
-    }
-
-    // Add logout handler for EasyAuth or fallback cookie logout
-    private void Logout()
-    {
-        if (AppOptions.Value.RequireEasyAuth)
-        {
-            // EasyAuth logout goes through platform endpoint; force full page load
-            NavigationManager.NavigateTo("/.auth/logout?post_logout_redirect_uri=/", forceLoad: true);
-        }
-        else
-        {
-            // Fallback route for non-EasyAuth scenarios (cookie logout)
-            NavigationManager.NavigateTo("/logout", forceLoad: true);
-        }
     }
 
     // Check if the session is active.
