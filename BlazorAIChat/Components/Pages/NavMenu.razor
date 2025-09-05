@@ -25,14 +25,15 @@
                     </button>
                 }
 
-            @if (User != null && (User.Role == UserRoles.Admin || !AppOptions.Value.RequireEasyAuth))
-            {
-                <button class="btn btn-sm btn-outline-light ms-2" @onclick="@(()=>NavigationManager.NavigateTo("/admin"))">
-                    <i class="bi bi-gear-fill me-1"></i>Admin
-                </button>
-            }
-        </div>
-    </div>
+                @if (User != null && (User.Role == UserRoles.Admin || !AppOptions.Value.RequireEasyAuth))
+                {
+                    <button class="btn btn-sm btn-outline-light ms-2" @onclick="@(()=>NavigationManager.NavigateTo("/admin"))">
+                        <i class="bi bi-gear-fill me-1"></i>Admin
+                    </button>
+                }
+            </div> <!-- close buttons container -->
+        </div> <!-- close w-100 container -->
+    </div> <!-- close navbar -->
 
     <div class="flex-grow-1 flex-column justify-content-center overflow-y-auto overflow-x-hidden">
         @if (_loadingComplete == true)

@@ -179,7 +179,7 @@ namespace BlazorAIChat.Authentication
                 if (!string.IsNullOrEmpty(dbUser.Name))
                 {
                     if (existingName != null) claims.Remove(existingName);
-                    claims.Add(new Claim(ClaimTypes.Name, $"{dbUser.Name} ({existingName?.Value})"));
+                    claims.Add(new Claim(ClaimTypes.Name, dbUser.Name));
                 }
                 else if (existingName != null)
                 {
