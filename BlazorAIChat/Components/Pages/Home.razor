@@ -255,6 +255,39 @@ else
 
     bool isPageFullyLoaded = false;
 
+    //Load current user, config, and settings so NavMenu receives populated User (fixes missing name/admin status)
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            settings = appSettings.Value;
+            // Load persisted config if present
+            var dbConfig = await dbContext.Config.FirstOrDefaultAsync();
+            if (dbConfig != null)
+                config = dbConfig;
+
+            // Resolve current user (EasyAuth or guest fallback)
+            currentUser = await userService.GetCurrentUserAsync();
+
+            // Determine if configuration screen should display (RequireEasyAuth enabled but no authenticated identity / user is still guest)
+            showNeedsConfigure = settings.RequireEasyAuth && currentUser.Role == UserRoles.Guest && (string.IsNullOrEmpty(currentUser.Id) || currentUser.Id.Equals("Guest User", StringComparison.OrdinalIgnoreCase));
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Home initialization error: {ex.Message}");
+        }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    protected override Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            isPageFullyLoaded = true;
+        }
+        return Task.CompletedTask;
+    }
+
     private void Stop()
     {
         if (!isResponding) return;
