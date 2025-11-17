@@ -23,7 +23,7 @@ namespace BlazorAIChat.Services
         private readonly AIChatDBContext _dbContext;
         private readonly ISecureStorage _secureStorage;
 
-        private record CachedConnection(IMcpClient Client, KernelPlugin Plugin, string ServerName);
+        private record CachedConnection(McpClient Client, KernelPlugin Plugin, string ServerName);
         private record CachedStatus(List<McpServerStatus> Statuses);
 
         private enum SourceRank
@@ -170,7 +170,7 @@ namespace BlazorAIChat.Services
                     }
                     finally
                     {
-                        if (client is IAsyncDisposable ad) await ad.DisposeAsync(); else if (client is IDisposable d) d.Dispose();
+                        await client.DisposeAsync().ConfigureAwait(false);
                     }
                 }
                 catch (Exception ex)
@@ -192,7 +192,7 @@ namespace BlazorAIChat.Services
             _cache.Set(StatusCacheKey(userId), new CachedStatus(statuses), new MemoryCacheEntryOptions
             {
                 SlidingExpiration = TimeSpan.FromSeconds(30),
-                AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(Math.Max(1, _appSettings.Value.Mcp.CacheAbsoluteExpirationMinutes))
+                AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(Math.Max(1, _appSettings.Value.Mcp?.CacheAbsoluteExpirationMinutes ?? 60))
             });
 
             return statuses;
@@ -232,7 +232,7 @@ namespace BlazorAIChat.Services
                     try
                     {
                         var client = await CreateClientWithRetryAsync(serverName: server.Name, cfg: server, userId, ct).ConfigureAwait(false);
-                        IList<McpClientTool> tools = await client.ListToolsAsync().ConfigureAwait(false);
+                        var tools = await client.ListToolsAsync().ConfigureAwait(false);
                         var plugin = KernelPluginFactory.CreateFromFunctions(server.Name, tools.Select(t => t.AsKernelFunction()));
                         created.Add(new CachedConnection(client, plugin, server.Name));
                     }
@@ -441,7 +441,7 @@ namespace BlazorAIChat.Services
             return Convert.ToHexString(bytes);
         }
 
-        private async Task<IMcpClient> CreateClientWithRetryAsync(string serverName, UserMcpServerConfig cfg, string userId, CancellationToken ct)
+        private async Task<McpClient> CreateClientWithRetryAsync(string serverName, UserMcpServerConfig cfg, string userId, CancellationToken ct)
         {
             var mcp = _appSettings.Value.Mcp;
             var retries = Math.Max(0, mcp.ConnectRetryCount);
@@ -467,36 +467,33 @@ namespace BlazorAIChat.Services
             throw last ?? new InvalidOperationException("CreateClient failed with unknown error");
         }
 
-        private async Task<IMcpClient> CreateClientAsync(string serverName, UserMcpServerConfig cfg, string userId)
+        private async Task<McpClient> CreateClientAsync(string serverName, UserMcpServerConfig cfg, string userId)
         {
-            // HTTP-based transports
-            if (string.Equals(cfg.Type, "sse", StringComparison.OrdinalIgnoreCase))
+            // HTTP-based transports (both 'sse' and 'http' now use HttpClientTransport)
+            if (string.Equals(cfg.Type, "sse", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(cfg.Type, "http", StringComparison.OrdinalIgnoreCase))
             {
                 var httpClient = _httpClientFactory.CreateClient("defaultHttpClient");
                 var headers = MergeHeadersWithInputs(cfg.HeadersJson, userId);
-                return await McpClientFactory.CreateAsync(
-                    new SseClientTransport(httpClient: httpClient, transportOptions: new SseClientTransportOptions
+                
+                // Set custom headers on the HttpClient
+                foreach (var header in headers)
+                {
+                    if (!httpClient.DefaultRequestHeaders.Contains(header.Key))
                     {
-                        Endpoint = new Uri(cfg.Url ?? string.Empty),
-                        AdditionalHeaders = headers,
-                        TransportMode = HttpTransportMode.Sse
-                    }),
-                    new McpClientOptions
-                    {
-                        ClientInfo = new() { Name = serverName, Version = "1.0.0.0" }
-                    });
-            }
-            else if (string.Equals(cfg.Type, "http", StringComparison.OrdinalIgnoreCase))
-            {
-                var httpClient = _httpClientFactory.CreateClient("defaultHttpClient");
-                var headers = MergeHeadersWithInputs(cfg.HeadersJson, userId);
-                return await McpClientFactory.CreateAsync(
-                    new SseClientTransport(httpClient: httpClient, transportOptions: new SseClientTransportOptions
-                    {
-                        Endpoint = new Uri(cfg.Url ?? string.Empty),
-                        AdditionalHeaders = headers,
-                        TransportMode = HttpTransportMode.StreamableHttp
-                    }),
+                        httpClient.DefaultRequestHeaders.TryAddWithoutValidation(header.Key, header.Value);
+                    }
+                }
+
+                // Create transport with endpoint URL
+                // The HttpClientTransport will use the configured httpClient instance
+                var transport = new HttpClientTransport(new HttpClientTransportOptions
+                {
+                    Endpoint = new Uri(cfg.Url ?? string.Empty),
+                }, httpClient);
+
+                return await McpClient.CreateAsync(
+                    transport,
                     new McpClientOptions
                     {
                         ClientInfo = new() { Name = serverName, Version = "1.0.0.0" }
@@ -506,12 +503,19 @@ namespace BlazorAIChat.Services
             // stdio transport
             var args = MergeArgsWithInputs(cfg.ArgsJson, userId);
             var env = MergeEnvWithInputs(cfg.EnvJson, userId);
-            return await McpClientFactory.CreateAsync(new StdioClientTransport(new()
+            
+            // Convert Dictionary<string, string> to IDictionary<string, string?>
+            var envWithNullable = env.ToDictionary<KeyValuePair<string, string>, string, string?>(
+                kvp => kvp.Key,
+                kvp => kvp.Value
+            );
+            
+            return await McpClient.CreateAsync(new StdioClientTransport(new()
             {
                 Name = serverName,
                 Command = cfg.Command ?? string.Empty,
                 Arguments = args,
-                EnvironmentVariables = env
+                EnvironmentVariables = envWithNullable
             }));
         }
 
@@ -590,14 +594,7 @@ namespace BlazorAIChat.Services
             {
                 try
                 {
-                    if (c.Client is IAsyncDisposable asyncDisposable)
-                    {
-                        await asyncDisposable.DisposeAsync().ConfigureAwait(false);
-                    }
-                    else if (c.Client is IDisposable disposable)
-                    {
-                        disposable.Dispose();
-                    }
+                    await c.Client.DisposeAsync().ConfigureAwait(false);
                 }
                 catch
                 {

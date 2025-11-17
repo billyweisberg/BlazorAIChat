@@ -135,14 +135,6 @@ The appsettings.json file has a few configuration parameters that must be set fo
         "GITHUB_PERSONAL_ACCESS_TOKEN": "${input:github_pat}"
       }
     },
-    "secure-sse-tool": {
-      "type": "sse",
-      "url": "https://your-secure-sse-server.example.com/mcp",
-      "headers": {
-        "Authorization": "Bearer ${input:api_token}",
-        "X-Custom-Header": "custom-value"
-      }
-    },
     "secure-http-tool": {
       "type": "http",
       "url": "https://your-streamable-http-server.example.com/mcp",

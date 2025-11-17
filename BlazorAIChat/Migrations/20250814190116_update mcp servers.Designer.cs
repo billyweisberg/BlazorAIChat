@@ -12,7 +12,7 @@ namespace BlazorAIChat.Migrations
 {
     [DbContext(typeof(AIChatDBContext))]
     [Migration("20250814190116_update mcp servers")]
-    partial class updatemcpservers
+    partial class UpdateMcpServers
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)

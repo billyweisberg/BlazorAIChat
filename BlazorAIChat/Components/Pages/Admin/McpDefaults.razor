@@ -414,6 +414,8 @@
 
     private static bool TryValidateJson(string? json, bool mustBeArray = false, bool mustBeObject = false)
     {
+        if (string.IsNullOrWhiteSpace(json)) return false;
+        
         try
         {
             var doc = System.Text.Json.JsonDocument.Parse(json);
