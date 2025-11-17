@@ -61,7 +61,7 @@ Note: If deployed on an Azure App Service with EasyAuth enabled, the uploaded do
 The appsettings.json file has a few configuration parameters that must be set for the app to properly work:
 
 ```
-"AIDeterminesRagUsage": false,
+"AIDeterminesRagUsage": true,
 "AzureOpenAIChatCompletion": {
   "Endpoint": "",
   "ApiKey": "",
@@ -77,10 +77,15 @@ The appsettings.json file has a few configuration parameters that must be set fo
   "MaxInputTokens": 8192
 },
 "RequireEasyAuth": true,
-"SystemMessage" : "You are a helpful AI assistant. Respond in a friendly and professional tone.",
+"SystemMessage" : "You are a helpful AI assistant. Respond in a friendly and professional tone. Answer questions directly and accurately using only the information provided and the tools available to you. Do not guess or fabricate information. You must plan carefully before making any function calls, and reflect thoroughly on the outcomes of previous calls. However, do not rely solely on internal reasoning when a tool is available that can provide a definitive answer. Use tools proactively and independently when they are relevant to resolving the user's query. If a question requires current or external information (e.g., today's date), you must call the appropriate tool rather than asking the user to verify. Only yield back to the user when you are confident the query has been fully resolved. Your goal is to completely and accurately solve the user's problem before ending your turn.",
 "ConnectionStrings": {
   "PostgreSQL": "",
+  "CosmosDb": "",
   "ConfigDatabase": "Data Source=ConfigDatabase.db"
+},
+"CosmosDb": {
+  "Database": "",
+  "Container": ""
 },
 "DocumentIntelligence": {
   "Endpoint": "",
@@ -143,11 +148,15 @@ The appsettings.json file has a few configuration parameters that must be set fo
         "X-Custom-Header": "custom-value"
       }
     }
-  }
+  },
+  "CacheSlidingExpirationMinutes": 15,
+  "CacheAbsoluteExpirationMinutes": 60,
+  "ConnectRetryCount": 2,
+  "ConnectRetryBackoffMs": 500
 }
 ```
 - AIDeterminesRagUsage
-  - True if you want AI to determine if it should skip using RAG and use configured tools instead for answering questions.
+  - True if you want AI to determine if it should skip using RAG and use configured tools instead for answering questions. (Default: true)
   - False if you want the chat to always use RAG with tools
 
 - AzureOpenAIChatCompletion Configuration: 
@@ -165,6 +174,13 @@ The appsettings.json file has a few configuration parameters that must be set fo
 
 - PostgreSQL (optional):
   - If you would like to use PostgreSQL in place of files for knowledge storage, you must manually deploy a PostgreSQL instance and configure the connection string. Note: You must enable the pgvector extension to use PostgreSQL.
+
+- CosmosDB (optional):
+  - If you would like to use Azure Cosmos DB for chat history storage instead of SQLite, configure the CosmosDb connection string and settings:
+    - `ConnectionStrings.CosmosDb`: The connection string to your Azure Cosmos DB account.
+    - `CosmosDb.Database`: The name of the Cosmos DB database to use.
+    - `CosmosDb.Container`: The name of the container within the database for storing chat sessions and messages.
+  - When configured, all chat history (sessions and messages) will be stored in Cosmos DB instead of the local SQLite database.
 
 - Azure Document Intelligence (optional)
   - You may choose to optionally manually deploy Azure Document Intelligence which can be used to OCR uploaded images. This is not needed or enabled if your AI model supports images.
@@ -202,6 +218,11 @@ The appsettings.json file has a few configuration parameters that must be set fo
     - Role defaults: Managed in the Admin UI at `/admin/mcp-defaults` and applied to users by role.
     - Per-user overrides: Stored per user and take precedence over role and global defaults.
   - Connections are cached briefly and established with short per-server timeouts and retries for responsiveness.
+  - Connection caching and retry settings:
+    - `CacheSlidingExpirationMinutes` (default: 15): How long to keep idle MCP connections in cache before closing.
+    - `CacheAbsoluteExpirationMinutes` (default: 60): Maximum time to keep any MCP connection cached.
+    - `ConnectRetryCount` (default: 2): Number of retry attempts when establishing MCP server connections.
+    - `ConnectRetryBackoffMs` (default: 500): Delay in milliseconds between connection retry attempts.
 
 ### Environment-specific configuration
 - In Development, the app only loads `appsettings.Development.json`.
@@ -266,6 +287,7 @@ You can learn more about the cost for Azure App Service and Azure OpenAI models 
 ## Authentication
 - If running locally, outside of Azure, or without EasyAuth, the app will show the user as a guest.
 - If running on an Azure App Service with EasyAuth configured, the app will show the logged in username.
+- A `/logout` endpoint is available to sign out users in non-EasyAuth scenarios (cookie-based authentication).
 
 See the following link for details about configuring EasyAuth in Azure App Service: https://learn.microsoft.com/en-us/azure/app-service/overview-authentication-authorization
 
@@ -276,6 +298,7 @@ If authorization is not enabled, then any authenticated user will be able to uti
 
 ### Admin configuration
 - The Admin Config page at `/admin/config` lets administrators set account expiration days, require account approvals, and toggle automatic approvals.
+- **Automatic Account Approval**: When enabled, new user access requests are automatically approved with User role. When disabled, requests require manual administrator approval.
 
 ## Knowledge Storage
 All uploaded knowledge is stored by default on the web server's file system under two folders:
