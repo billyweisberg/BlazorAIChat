@@ -143,8 +143,8 @@ builder.Services.AddTransient<Kernel>(serviceProvider =>
             httpClient: httpClient)
         .AddAzureOpenAIEmbeddingGenerator(
             appSettings.AzureOpenAIEmbedding.DeploymentName,
-            appSettings.AzureOpenAIChatCompletion.Endpoint,
-            appSettings.AzureOpenAIChatCompletion.ApiKey,
+            appSettings.AzureOpenAIEmbedding.Endpoint,
+            appSettings.AzureOpenAIEmbedding.ApiKey,
             httpClient: httpClient);
 
     kernelBuilder.Services.AddLogging(services => services.AddConsole().SetMinimumLevel(LogLevel.Trace));

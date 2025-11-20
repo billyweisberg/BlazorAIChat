@@ -72,6 +72,8 @@ The appsettings.json file has a few configuration parameters that must be set fo
   "ResponseChunkSize": 40
 },
 "AzureOpenAIEmbedding": {
+  "Endpoint": "",
+  "ApiKey": "",
   "DeploymentName": "",
   "Tokenizer": "",
   "MaxInputTokens": 8192
@@ -167,10 +169,11 @@ The appsettings.json file has a few configuration parameters that must be set fo
   - `ResponseChunkSize` defines the number of response chunks from the Azure OpenAI service that need to be received before the UI is updated. The higher the number, the less UI updates are required, which improves the Blazor app performance.
 
 - AzureOpenAIEmbedding Configuration: 
+  - Include your Azure OpenAI endpoint URL and API Key for the embedding service.
   - Specify the deployed embedding model you plan to use.
   - Specify the tokenizer to use. Generally this is the model name (not deployment name)
   - Specify the maximum input tokens the selected model supports
-  - Both the chat and embedding models are assumed to be accessed through the same Azure OpenAI endpoint and API key.
+  - The embedding model can use the same or a different Azure OpenAI endpoint and API key as the chat model.
 
 - PostgreSQL (optional):
   - If you would like to use PostgreSQL in place of files for knowledge storage, you must manually deploy a PostgreSQL instance and configure the connection string. Note: You must enable the pgvector extension to use PostgreSQL.

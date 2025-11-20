@@ -109,8 +109,8 @@ namespace BlazorAIChat.Services
                 )
                 {
                     Context = "/document/pages/*",
-                    ResourceUri = new Uri(settings.AzureOpenAIChatCompletion.Endpoint),
-                    ApiKey = settings.AzureOpenAIChatCompletion.ApiKey,
+                    ResourceUri = new Uri(settings.AzureOpenAIEmbedding.Endpoint),
+                    ApiKey = settings.AzureOpenAIEmbedding.ApiKey,
                     DeploymentName = settings.AzureOpenAIEmbedding.DeploymentName,
                     ModelName = settings.AzureOpenAIEmbedding.DeploymentName
                 }
@@ -204,8 +204,8 @@ namespace BlazorAIChat.Services
                         {
                             Parameters = new AzureOpenAIVectorizerParameters()
                             {
-                                ResourceUri = new Uri(settings.AzureOpenAIChatCompletion.Endpoint),
-                                ApiKey = settings.AzureOpenAIChatCompletion.ApiKey,
+                                ResourceUri = new Uri(settings.AzureOpenAIEmbedding.Endpoint),
+                                ApiKey = settings.AzureOpenAIEmbedding.ApiKey,
                                 DeploymentName = settings.AzureOpenAIEmbedding.DeploymentName,
                                 ModelName = settings.AzureOpenAIEmbedding.DeploymentName
                             }

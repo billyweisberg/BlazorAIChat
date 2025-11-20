@@ -67,6 +67,14 @@ resource appService 'Microsoft.Web/sites@2020-06-01' = {
           value: aiChatModelSupportsImages ? 'true' : 'false'
         }
         {
+          name: 'AzureOpenAIEmbedding__Endpoint'
+          value: openAiService.properties.endpoint
+        }
+        {
+          name: 'AzureOpenAIEmbedding__ApiKey'
+          value: openAiService.listKeys().key1
+        }
+        {
           name: 'AzureOpenAIEmbedding__DeploymentName'
           value: toLower('${aiEmbedModelName}')
         }

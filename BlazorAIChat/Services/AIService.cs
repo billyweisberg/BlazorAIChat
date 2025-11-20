@@ -223,7 +223,7 @@ namespace BlazorAIChat.Services
             ArgumentNullException.ThrowIfNull(textEmbeddingGenerationService);
 
             var kernelMemoryBuilder = new KernelMemoryBuilder()
-                .WithAzureOpenAITextEmbeddingGeneration(new AzureOpenAIConfig() { Auth = AzureOpenAIConfig.AuthTypes.APIKey, APIKey = settings.AzureOpenAIChatCompletion.ApiKey, Deployment = settings.AzureOpenAIEmbedding.DeploymentName, Endpoint = settings.AzureOpenAIChatCompletion.Endpoint }, embeddingTokenizer, httpClient: httpClient)
+                .WithAzureOpenAITextEmbeddingGeneration(new AzureOpenAIConfig() { Auth = AzureOpenAIConfig.AuthTypes.APIKey, APIKey = settings.AzureOpenAIEmbedding.ApiKey, Deployment = settings.AzureOpenAIEmbedding.DeploymentName, Endpoint = settings.AzureOpenAIEmbedding.Endpoint }, embeddingTokenizer, httpClient: httpClient)
                 .WithAzureOpenAITextGeneration(new AzureOpenAIConfig() { Auth = AzureOpenAIConfig.AuthTypes.APIKey, APIKey = settings.AzureOpenAIChatCompletion.ApiKey, Deployment = settings.AzureOpenAIChatCompletion.DeploymentName, Endpoint = settings.AzureOpenAIChatCompletion.Endpoint }, chatCompletionTokenizer, httpClient);
 
             if (settings.UsesAzureAISearch && settings.AzureAISearch.IndexPerChatSession)
