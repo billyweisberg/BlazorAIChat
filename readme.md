@@ -1,13 +1,6 @@
 # Blazor Azure OpenAI Chat Demo
 ##### BlazorAIChat: AI-Powered Chat Application
 
-## ⚠️ Legacy Notice
-**This application is built using Semantic Kernel, which is now considered legacy technology as of November 2025.** 
-
-For new chat and agent solutions, Microsoft recommends using the **Microsoft Agent Framework**, which combines the best features of Semantic Kernel with AutoGen to provide a more robust and modern approach to building AI agents and chat applications.
-
-**This repository should no longer be used as a reference for new applications.** Please refer to the Microsoft Agent Framework documentation for guidance on building new AI-powered chat and agent solutions.
-
 ## Overview
 This is a sample .NET 10 Blazor Interactive Server application for chatting with Azure OpenAI Models. Users may upload TXT, MD, DOCX, XLSX, PPTX or PDF documents to a knowledge base for the AI to use when responding. If configured, it can also upload images for those AI models that support images in chat.
 
